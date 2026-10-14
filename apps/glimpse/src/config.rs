@@ -185,29 +185,31 @@ pub fn valid_date(s: &str) -> bool {
     y >= 1900 && d > 0 && d <= max
 }
 pub fn forbidden(p: &Path) -> bool {
-    p.components().any(|c| {
-        let s = c.as_os_str().to_string_lossy().to_lowercase();
-        s.starts_with('.')
-            || [
-                "node_modules",
-                "target",
-                "vendor",
-                "dist",
-                "build",
-                "cache",
-                "caches",
-                "credentials",
-                "secrets",
-                "id_rsa",
-                "id_ed25519",
-                "passwords.txt",
-                "credentials.json",
-                "credentials.toml",
-                "token.json",
-            ]
-            .contains(&s.as_str())
-            || [".pem", ".key", ".p12", ".pfx", ".crt", ".cer"].iter().any(|ext| s.ends_with(ext))
-    })
+    p.components().any(|c| forbidden_name(c.as_os_str()))
+}
+/// Hidden, generated and secret-looking names, matched one path component at a time.
+pub fn forbidden_name(name: &std::ffi::OsStr) -> bool {
+    let s = name.to_string_lossy().to_lowercase();
+    s.starts_with('.')
+        || [
+            "node_modules",
+            "target",
+            "vendor",
+            "dist",
+            "build",
+            "cache",
+            "caches",
+            "credentials",
+            "secrets",
+            "id_rsa",
+            "id_ed25519",
+            "passwords.txt",
+            "credentials.json",
+            "credentials.toml",
+            "token.json",
+        ]
+        .contains(&s.as_str())
+        || [".pem", ".key", ".p12", ".pfx", ".crt", ".cer"].iter().any(|ext| s.ends_with(ext))
 }
 pub fn allowed(c: &Config, p: &Path) -> bool {
     if forbidden(p) || !c.roots.iter().any(|r| p.starts_with(r)) || c.excluded.iter().any(|r| p.starts_with(r)) {

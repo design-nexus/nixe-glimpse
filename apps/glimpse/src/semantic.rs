@@ -106,7 +106,15 @@ pub const IDENTITY: &str = "glimpse-embeddinggemma2-q8-v1";
 pub struct Session {
     worker: Option<Worker>,
     last_use: std::time::Instant,
+    /// Generic queries' vectors per task (search, code), for measuring each item's hubness.
+    probes: std::collections::HashMap<bool, Vec<Vec<f32>>>,
 }
+/// Queries that ask for nothing in particular. An item that scores well against these
+/// scores well against everything (a near-blank image, a boilerplate page), so its
+/// similarity to them is subtracted before it can count as related.
+/// They name no kind of file, so a query that asks for pictures or recordings isn't
+/// marked down for it.
+const PROBES: [&str; 8] = ["something", "anything", "information", "a file", "an item", "data", "stuff", "content"];
 struct Worker {
     child: std::process::Child,
     input: std::process::ChildStdin,
@@ -263,7 +271,7 @@ fn unpack(bytes: &[u8]) -> Result<Vec<f32>> {
 }
 impl Session {
     pub fn start(_p: &Paths) -> Result<Self> {
-        Ok(Self { worker: None, last_use: std::time::Instant::now() })
+        Ok(Self { worker: None, last_use: std::time::Instant::now(), probes: Default::default() })
     }
     pub fn release_idle(&mut self) {
         if self.last_use.elapsed() > Duration::from_secs(30) {
@@ -297,6 +305,22 @@ impl Session {
                 return Err(e);
             }
         };
+        if !self.probes.contains_key(&code) {
+            let task = if code { "code retrieval" } else { "search result" };
+            let mut vectors = Vec::new();
+            for probe in PROBES {
+                let prompt = format!("task: {task} | query: {probe}");
+                match self.worker.as_mut().unwrap().embed("text", &prompt, &cancelled) {
+                    Ok(v) => vectors.push(v),
+                    Err(e) => {
+                        self.worker = None;
+                        return Err(e);
+                    }
+                }
+            }
+            self.probes.insert(code, vectors);
+        }
+        let probes = &self.probes[&code];
         self.last_use = std::time::Instant::now();
         let active = crate::plugins::list(p)?;
         let permitted = |path: &str, reader: &Option<String>, is_code: bool| {
@@ -311,6 +335,9 @@ impl Session {
                 })
         };
         let mut stmt = db.prepare("SELECT id,path,kind,loc,text,vector,code,reader FROM segments WHERE code=?1")?;
+        // Best segment per file by lift: its similarity to the query minus its similarity to
+        // queries for nothing in particular. Raw cosine favours "hubs" (tiny theme images,
+        // boilerplate pages) that sit close to every query and turned up for everything.
         let mut best = std::collections::HashMap::<String, (f32, Value)>::new();
         for row in stmt.query_map([code], |r| {
             Ok((
@@ -332,8 +359,11 @@ impl Session {
                 continue;
             }
             let stored = unpack(&bytes)?;
-            let cosine: f32 = vector.iter().zip(stored).map(|(a, b)| a * b).sum();
-            if best.get(&path).is_none_or(|(score, _)| cosine > *score) {
+            let dot = |q: &[f32]| q.iter().zip(&stored).map(|(a, b)| a * b).sum::<f32>();
+            let cosine = dot(&vector);
+            let baseline = probes.iter().map(|p| dot(p)).sum::<f32>() / probes.len() as f32;
+            let lift = cosine - baseline;
+            if best.get(&path).is_none_or(|(score, _)| lift > *score) {
                 let file_kind = match kind.as_str() {
                     "page" | "page_image" => "pdf",
                     "image" => "image",
@@ -341,21 +371,35 @@ impl Session {
                     "frame" => "video",
                     _ => "doc",
                 };
-                best.insert(path.clone(),(cosine,json!({"path":path,"kind":file_kind,"segment":kind,"loc":loc,"cosine":cosine,"segment_id":id,"excerpt":text.chars().take(1000).collect::<String>(),"reader":reader})));
+                best.insert(path.clone(),(lift,json!({"path":path,"kind":file_kind,"segment":kind,"loc":loc,"cosine":cosine,"lift":lift,"segment_id":id,"excerpt":text.chars().take(1000).collect::<String>(),"reader":reader})));
             }
         }
-        let mut semantic: Vec<_> = best.into_values().filter(|(score, _)| *score >= 0.65).collect();
-        semantic.sort_by(|a, b| b.0.total_cmp(&a.0));
-        if let Some((best_score, _)) = semantic.first() {
-            let minimum = *best_score - 0.08;
-            semantic.retain(|(score, _)| *score >= minimum);
+        // Clear standouts only: on this model, related files lift 0.09–0.2 above the generic
+        // baseline while unrelated ones stay under about 0.07.
+        // Clear standouts only. On this model related files lift 0.09–0.2 above the generic
+        // baseline and unrelated ones stay under about 0.07. Sound matches text weakly, so a
+        // single result far ahead of every other (0.06 or more) also counts.
+        let mut ranked: Vec<_> = best.into_values().collect();
+        ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let standout = match ranked.as_slice() {
+            [(top, _), (next, _), ..] => *top > 0. && top - next >= 0.06,
+            [(top, _)] => *top > 0.,
+            [] => false,
+        };
+        let mut semantic: Vec<_> =
+            ranked.into_iter().enumerate().filter(|(i, (lift, _))| *lift >= 0.09 || (*i == 0 && standout)).map(|(_, hit)| hit).collect();
+        if let Some((top, _)) = semantic.first() {
+            let minimum = *top - 0.05;
+            semantic.retain(|(lift, _)| *lift >= minimum);
         }
         let mut fused = std::collections::HashMap::<String, (f64, Value)>::new();
         for (rank, (_, mut hit)) in semantic.into_iter().take(5).enumerate() {
             hit["related"] = true.into();
             fused.insert(hit["path"].as_str().unwrap().into(), (1. / (60. + rank as f64), hit));
         }
-        let expression = crate::query::fts(query);
+        // Words in a file's contents count only when they appear together, as typed, not
+        // scattered across a 1,500-character chunk; prefixes are for names, not contents.
+        let expression = crate::query::fts_near(query);
         if !expression.is_empty() {
             let mut words=db.prepare("SELECT s.path,s.kind,s.loc,s.text,s.reader,s.code FROM words JOIN segments s ON s.id=words.rowid WHERE words MATCH ?1 AND s.code=?2 ORDER BY bm25(words) LIMIT 100")?;
             let mut seen = std::collections::HashSet::new();
@@ -373,6 +417,9 @@ impl Session {
                 let (path, kind, loc, text, reader, is_code) = row?;
                 if !permitted(&path, &reader, is_code) || !seen.insert(path.clone()) {
                     continue;
+                }
+                if seen.len() > 8 {
+                    break;
                 }
                 let entry=fused.entry(path.clone()).or_insert_with(||(0.,json!({"path":path,"kind":if kind=="page"{"pdf"}else{"doc"},"segment":kind,"loc":loc,"excerpt":text.chars().take(1000).collect::<String>(),"reader":reader})));
                 entry.0 += 1. / (60. + rank as f64);
@@ -428,9 +475,10 @@ fn extract(
     let capture = |program: &str, args: Vec<std::ffi::OsString>, limit: usize| -> Result<Vec<u8>> {
         let mut command = Command::new(program);
         command.args(args);
-        process::capture_cancel(command, vec![], Duration::from_secs(10), limit, || {
+        let stop = process::throttled(Duration::from_millis(250), || {
             p.load().map_or(true, |now| now.paused || !config::allowed(&now, path))
-        })
+        });
+        process::capture_cancel(command, vec![], Duration::from_secs(10), limit, stop)
     };
     if ext == "pdf" {
         let bytes = capture("pdfinfo", vec![path.as_os_str().to_owned()], 65536)?;
@@ -671,7 +719,8 @@ fn extract(
             if bytes.len() > 4 * 1024 * 1024 {
                 bail!("text file exceeds extraction limit; use a reader plugin");
             }
-            let text = String::from_utf8(bytes)?;
+            // Older text files are often Latin-1; index what can be read rather than failing.
+            let text = String::from_utf8_lossy(&bytes).into_owned();
             if ["html", "htm"].contains(&ext.as_str()) { strip_markup(&text) } else { text }
         };
         let chars: Vec<char> = text.chars().collect();
@@ -722,7 +771,8 @@ fn extract(
     }
     Ok((pieces, true, false, 1))
 }
-fn strip_markup(text: &str) -> String {
+/// Text of an XML/HTML document: tags become spaces and entities are decoded.
+pub fn strip_markup(text: &str) -> String {
     let mut inside = false;
     let mut out = String::new();
     for ch in text.chars() {
@@ -736,20 +786,78 @@ fn strip_markup(text: &str) -> String {
             _ => {}
         }
     }
-    out.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+    decode_entities(&out)
 }
+/// Decodes named XML entities and numeric references in one pass, so "&amp;lt;" stays "&lt;".
+fn decode_entities(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        let decoded = rest[1..].find(';').filter(|end| *end <= 10).and_then(|end| {
+            let name = &rest[1..=end];
+            let ch = match name {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                "nbsp" => Some('\u{a0}'),
+                _ => name
+                    .strip_prefix("#x")
+                    .or_else(|| name.strip_prefix("#X"))
+                    .map(|hex| u32::from_str_radix(hex, 16))
+                    .or_else(|| name.strip_prefix('#').map(str::parse::<u32>))
+                    .and_then(|n| n.ok())
+                    .and_then(char::from_u32),
+            }?;
+            Some((ch, end + 2))
+        });
+        match decoded {
+            Some((ch, len)) => {
+                out.push(ch);
+                rest = &rest[len..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn entities_decode_once() {
+        assert_eq!(super::strip_markup("<w:t>a &amp;lt; b &quot;c&apos; &#233;&#x41; &bogus; & x</w:t>"), " a &lt; b \"c' éA &bogus; & x ");
+    }
+}
+/// Scan the sources, then index their contents.
 pub fn index(p: &Paths) -> Result<()> {
+    let cfg = p.load()?;
+    if cfg.semantic && !cfg.paused && !cfg.roots.is_empty() {
+        crate::index::scan(p, &cfg)?;
+    }
+    index_scanned(p).map(|_| ())
+}
+/// Index contents of files the filename index already lists; the daemon scans first.
+/// Returns true when work is left over (time budget used up or files part-done), so the
+/// caller should run another pass soon.
+pub fn index_scanned(p: &Paths) -> Result<bool> {
     use std::os::fd::AsRawFd;
     p.ensure()?;
     let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(p.state.join("semantic.lock"))?;
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Ok(());
+        return Ok(false);
     }
     let cfg = p.load()?;
     if !cfg.semantic || cfg.paused || cfg.roots.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
-    crate::index::scan(p, &cfg)?;
+    let mut out_of_time = false;
     let source = crate::index::open(p)?;
     let mut db = database(p)?;
     let documents: Vec<String> =
@@ -767,54 +875,69 @@ pub fn index(p: &Paths) -> Result<()> {
         .collect::<rusqlite::Result<_>>()?;
     let mut worker: Option<Worker> = None;
     let started = std::time::Instant::now();
+    let reader_version = crate::plugins::list(p)?
+        .into_iter()
+        .filter(|x| x.grant.enabled && x.manifest.capabilities.contains(&"reader".into()))
+        .map(|x| format!("{}:{}", x.manifest.id, x.manifest.version))
+        .collect::<Vec<_>>()
+        .join("|");
+    let mut current = cfg.clone();
+    let mut loaded = std::time::Instant::now();
     for (path, mtime, size) in files {
-        let current = p.load()?;
+        // Settings are re-read at most once a second, not once per file.
+        if loaded.elapsed() >= Duration::from_secs(1) {
+            current = p.load()?;
+            loaded = std::time::Instant::now();
+        }
         if current.paused
             || !current.semantic
             || current.roots != cfg.roots
             || current.excluded != cfg.excluded
-            || started.elapsed() > Duration::from_secs(300)
         {
+            break;
+        }
+        if started.elapsed() > Duration::from_secs(300) {
+            out_of_time = true;
             break;
         }
         let file = std::path::Path::new(&path);
         if !config::allowed(&current, file) || !file.is_file() {
             continue;
         }
-        let reader_version = crate::plugins::list(p)?
-            .into_iter()
-            .filter(|x| x.grant.enabled && x.manifest.capabilities.contains(&"reader".into()))
-            .map(|x| format!("{}:{}", x.manifest.id, x.manifest.version))
-            .collect::<Vec<_>>()
-            .join("|");
         let stamp = format!("{mtime}:{size}:{}:{reader_version}", cfg.code_roots.iter().any(|r| file.starts_with(r)));
         let cached: Option<(String, String, i64)> = db
             .query_row("SELECT stamp,status,cursor FROM documents WHERE path=?1", [&path], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?))
             })
             .ok();
-        if cached.as_ref().is_some_and(|(s, state, _)| s == &stamp && state == "done") {
+        // A failed file is retried only once it changes, not on every pass.
+        if cached.as_ref().is_some_and(|(s, state, _)| s == &stamp && (state == "done" || state == "error")) {
             continue;
         }
         let cursor = cached.as_ref().filter(|(s, _, _)| s == &stamp).map(|(_, _, n)| *n as usize).unwrap_or(0);
         if cursor == 0 {
             db.execute("DELETE FROM segments WHERE path=?1", [&path])?;
         }
-        let cancelled = || p.load().map_or(true, |c| c.paused || !c.semantic || !config::allowed(&c, file));
+        let cancelled = process::throttled(Duration::from_millis(250), || {
+            p.load().map_or(true, |c| c.paused || !c.semantic || !config::allowed(&c, file))
+        });
+        // Only a worker failure restarts the model; a file that can't be read leaves it running.
+        let mut worker_fault = false;
         let result = (|| -> Result<(usize, bool)> {
             let (pieces, complete, code, next_cursor) = extract(p, file, &current, cursor)?;
             if pieces.is_empty() {
                 return Ok((next_cursor, complete));
             }
             if worker.is_none() {
-                worker = Some(Worker::start(p, false)?);
+                worker = Some(Worker::start(p, false).inspect_err(|_| worker_fault = true)?);
             }
             let mut ready = Vec::new();
             for piece in pieces {
                 if cancelled() {
                     bail!("indexing cancelled");
                 }
-                let vector = worker.as_mut().unwrap().embed(piece.op, &piece.input, &cancelled)?;
+                let vector =
+                    worker.as_mut().unwrap().embed(piece.op, &piece.input, &cancelled).inspect_err(|_| worker_fault = true)?;
                 ready.push((piece, vector));
             }
             if cancelled() {
@@ -841,10 +964,18 @@ pub fn index(p: &Paths) -> Result<()> {
                 )?;
             }
             Err(e) => {
-                worker = None;
+                // Paused, switched off or source removed: leave the document for a later pass.
+                if cancelled() {
+                    break;
+                }
+                // A worker crash or timeout may pass; a file that can't be read waits until it changes.
+                let status = if worker_fault { "retry" } else { "error" };
+                if worker_fault {
+                    worker = None;
+                }
                 db.execute(
-                    "INSERT OR REPLACE INTO documents(path,stamp,status,cursor,error) VALUES(?1,?2,'error',?3,?4)",
-                    rusqlite::params![path, stamp, cursor as i64, e.to_string()],
+                    "INSERT OR REPLACE INTO documents(path,stamp,status,cursor,error) VALUES(?1,?2,?3,?4,?5)",
+                    rusqlite::params![path, stamp, status, cursor as i64, e.to_string()],
                 )?;
             }
         }
@@ -858,5 +989,6 @@ pub fn index(p: &Paths) -> Result<()> {
     if p.state.join("extract").exists() {
         fs::remove_dir_all(p.state.join("extract"))?;
     }
-    Ok(())
+    let partial: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM documents WHERE status='partial')", [], |r| r.get(0))?;
+    Ok(out_of_time || partial)
 }

@@ -18,6 +18,11 @@ use std::{
     },
     time::Duration,
 };
+/// The launcher keeps one width; it only grows downwards once there are results.
+const WIDTH: i32 = 760;
+const COLLAPSED: i32 = 56;
+const EXPANDED: i32 = 460;
+const LIST_WIDTH: i32 = 300;
 thread_local! {static PANEL:RefCell<Option<gtk::ApplicationWindow>>=const{RefCell::new(None)};}
 #[derive(Clone)]
 enum Action {
@@ -30,17 +35,20 @@ enum Action {
 #[derive(Clone)]
 struct ResultRow {
     title: String,
-    detail: String,
+    /// The second line: a file's folder, a plugin's subtitle, a conversion's source.
+    folder: String,
+    /// Why it matched, shown as a small tag: "Related", "p. 4", "Line 12".
+    reason: String,
     action: Action,
 }
 impl ResultRow {
     fn category(&self) -> (u8, &'static str) {
         match self.action {
             Action::App(_) => (0, "Applications"),
-            Action::File(_, ref hit) if hit["related"] == true => (5, "Related results"),
+            Action::File(_, ref hit) if hit["related"] == true => (RELATED, "Related"),
             Action::File(_, _) => (1, "Files"),
             Action::Copy(_) => (2, "Utilities"),
-            Action::System(_) => (3, "System Commands"),
+            Action::System(_) => (3, "System"),
             Action::Plugin(_, _, _) => (4, "Plugins"),
         }
     }
@@ -52,6 +60,46 @@ impl ResultRow {
             Action::System(cmd) => format!("system:{cmd}"),
             Action::Plugin(id, hit, _) => format!("plugin:{id}:{hit}"),
         }
+    }
+}
+/// A file's folder for display, with the home folder as "~".
+fn folder_of(path: &Path) -> String {
+    let parent = path.parent().unwrap_or(path);
+    match std::env::var_os("HOME").map(PathBuf::from).and_then(|home| parent.strip_prefix(home).ok().map(Path::to_owned)) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".into(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => parent.display().to_string(),
+    }
+}
+fn clock(seconds: f64) -> String {
+    let s = seconds.max(0.).round() as u64;
+    if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60) } else { format!("{}:{:02}", s / 60, s % 60) }
+}
+/// Where a content hit landed, in words: a page, a line or a moment.
+fn match_place(hit: &Value) -> Option<String> {
+    let loc = hit["loc"].as_f64();
+    if let Some(page) = hit["info"]["page"].as_u64().or_else(|| loc.filter(|_| hit["kind"] == "pdf").map(|n| n as u64)) {
+        return Some(format!("Page {page}"));
+    }
+    if let Some(line) = hit["info"]["line"].as_u64().or_else(|| loc.filter(|_| hit["segment"] == "lines").map(|n| n as u64)) {
+        return Some(format!("Line {line}"));
+    }
+    hit["info"]["seconds"]
+        .as_f64()
+        .or_else(|| loc.filter(|_| hit["kind"] == "audio" || hit["kind"] == "video"))
+        .map(|s| format!("At {}", clock(s)))
+}
+/// The tag beside a file found by its contents rather than its name.
+fn match_reason(hit: &Value) -> String {
+    if hit.is_null() {
+        return String::new();
+    }
+    if hit["related"] == true {
+        return "Related".into();
+    }
+    match match_place(hit) {
+        Some(place) => place.replace("Page ", "p. "),
+        None => "Content".into(),
     }
 }
 fn focus_search(window: &gtk::ApplicationWindow, entry: &gtk::SearchEntry) {
@@ -113,64 +161,47 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title("Glimpse")
-        .default_width(640)
-        .default_height(64)
+        .default_width(WIDTH)
+        .default_height(COLLAPSED)
         .decorated(false)
         .resizable(false)
         .build();
     window.add_css_class("glimpse-window");
     let main = gtk::Box::new(gtk::Orientation::Vertical, 0);
     main.add_css_class("glimpse-frame");
-    let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    toolbar.add_css_class("search-toolbar");
-    let entry = gtk::SearchEntry::builder().placeholder_text("Find apps, files, ideas…").search_delay(0).hexpand(true).build();
-    toolbar.append(&entry);
-    let folder = nixe_ui::widgets::icon_button("folder-new-symbolic", "Add a folder");
-    let app_clone = app.clone();
-    folder.connect_clicked(move |_| add_folder(&app_clone));
-    toolbar.append(&folder);
-    let plugin = nixe_ui::widgets::icon_button("application-x-addon-symbolic", "Plugins");
-    let app_clone = app.clone();
-    plugin.connect_clicked(move |_| plugin_manager(&app_clone));
-    toolbar.append(&plugin);
-    folder.set_visible(false);
-    plugin.set_visible(false);
-    main.append(&toolbar);
-    let content = gtk::Paned::new(gtk::Orientation::Horizontal);
-    content.set_position(350);
-    content.set_size_request(-1, 550);
+    let search_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    search_bar.add_css_class("search-bar");
+    let entry = gtk::SearchEntry::builder()
+        .placeholder_text("Search apps, files and content")
+        .search_delay(0)
+        .hexpand(true)
+        .build();
+    entry.add_css_class("glimpse-search");
+    search_bar.append(&entry);
+    main.append(&search_bar);
+    // Results on the left, the selected one previewed on the right; or an empty state.
+    let content = gtk::Stack::new();
     content.set_vexpand(true);
+    let results = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::Single);
+    list.add_css_class("results");
     let scroll = gtk::ScrolledWindow::builder()
         .vscrollbar_policy(gtk::PolicyType::External)
-        .hscrollbar_policy(gtk::PolicyType::External)
+        .hscrollbar_policy(gtk::PolicyType::Never)
         .child(&list)
-        .hscrollbar_policy(gtk::PolicyType::External)
+        .width_request(LIST_WIDTH)
         .build();
-    content.set_start_child(Some(&scroll));
-    let preview_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    preview_box.add_css_class("preview");
-    let picture = gtk::Picture::new();
-    picture.set_can_shrink(true);
-    picture.set_size_request(180, 180);
-    picture.set_visible(false);
-    let preview = gtk::Label::new(Some("Select a result to preview it."));
-    preview.set_wrap(true);
-    preview.set_selectable(true);
-    preview.set_xalign(0.);
-    preview.set_yalign(0.);
-    let preview_scroll = gtk::ScrolledWindow::builder()
-        .vscrollbar_policy(gtk::PolicyType::External)
-        .hscrollbar_policy(gtk::PolicyType::External)
-        .child(&preview)
-        .vexpand(true)
-        .build();
-    let media = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    preview_box.append(&media);
-    preview_box.append(&picture);
+    results.append(&scroll);
+    let pane = PreviewPane::new(&entry);
+    results.append(&pane.root);
+    content.add_named(&results, Some("results"));
+    let empty = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.add_named(&empty, Some("empty"));
+    content.set_visible(false);
+    main.append(&content);
     let playback: Rc<RefCell<Option<Player>>> = Rc::new(RefCell::new(None));
-    let media_hide = media.clone();
+    let media_hide = pane.media.clone();
     let playback_hide = playback.clone();
     window.connect_visible_notify(move |w| {
         if !w.is_visible() {
@@ -186,18 +217,45 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
             });
         }
     });
-    preview_box.append(&preview_scroll);
-    let (calculator, calculation_display) = calculator_preview(&entry);
-    calculator.set_visible(false);
-    preview_box.append(&calculator);
-    content.set_end_child(Some(&preview_box));
-    content.set_visible(false);
-    main.append(&content);
-    let footer = gtk::Label::new(Some("↑ ↓ select · Enter open · Ctrl+Enter reveal · Esc close"));
+    // Status bar: key hints for the selected result (or a message), the count, then actions.
+    let status_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    status_bar.add_css_class("status-bar");
+    let hints = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    hints.add_css_class("status-hints");
+    status_bar.append(&hints);
+    let footer = gtk::Label::new(None);
+    footer.add_css_class("status-message");
+    footer.set_ellipsize(gtk::pango::EllipsizeMode::End);
     footer.set_xalign(0.);
-    footer.add_css_class("footer");
     footer.set_visible(false);
-    main.append(&footer);
+    let hints_toggle = hints.clone();
+    footer.connect_label_notify(move |label| {
+        // A message replaces the hints until it is cleared.
+        let message = !label.label().is_empty();
+        label.set_visible(message);
+        hints_toggle.set_visible(!message);
+    });
+    status_bar.append(&footer);
+    let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    status_bar.append(&spacer);
+    let count = gtk::Label::new(None);
+    count.add_css_class("status-count");
+    status_bar.append(&count);
+    let app_clone = app.clone();
+    status_bar.append(&nixe_ui::chrome::status_action("folder-new-symbolic", "Add a folder to search", move || {
+        add_folder(&app_clone)
+    }));
+    let app_clone = app.clone();
+    status_bar.append(&nixe_ui::chrome::status_action("application-x-addon-symbolic", "Plugins", move || {
+        plugin_manager(&app_clone)
+    }));
+    status_bar.append(&nixe_ui::chrome::gear(|| {
+        dismiss();
+        let _ = Command::new("nixe-settings").args(["--section", "glimpse"]).spawn();
+    }));
+    status_bar.set_visible(false);
+    main.append(&status_bar);
     window.set_child(Some(&main));
     let armed = Rc::new(RefCell::new(None::<String>));
     let rows: Rc<RefCell<Vec<ResultRow>>> = Rc::new(RefCell::new(Vec::new()));
@@ -211,9 +269,13 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         if same {
             row.set_header(None::<&gtk::Widget>);
         } else {
-            let label = gtk::Label::new(Some(result.category().1));
+            // GTK CSS can't uppercase, so the heading is written that way.
+            let label = gtk::Label::new(Some(&result.category().1.to_uppercase()));
             label.set_xalign(0.);
             label.add_css_class("category-heading");
+            if before.is_none() {
+                label.add_css_class("first");
+            }
             row.set_header(Some(&label));
         }
     });
@@ -225,6 +287,8 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         .filter(|a| a.should_show())
         .filter_map(|a| {
             a.id().map(|id| {
+                // Kept on this thread for the rows' icons and the app preview.
+                APPS.with(|apps| apps.borrow_mut().insert(id.to_string(), a.clone()));
                 let keywords = app_keywords(&id);
                 (
                     id.to_string(),
@@ -273,7 +337,8 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
             for (id, hit) in plugins::search_cancel(&p, q, cancelled) {
                 enrich.push(ResultRow {
                     title: hit.title,
-                    detail: format!("{} · {}", id, hit.subtitle),
+                    folder: hit.subtitle,
+                    reason: String::new(),
                     action: Action::Plugin(id, hit.id, hit.action),
                 });
             }
@@ -292,11 +357,8 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                                 let path = PathBuf::from(path);
                                 enrich.push(ResultRow {
                                     title: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-                                    detail: format!(
-                                        "{} · {}",
-                                        if hit["related"] == true { "Related" } else { "Content match" },
-                                        path.display()
-                                    ),
+                                    folder: folder_of(&path),
+                                    reason: match_reason(&hit),
                                     action: Action::File(path, hit),
                                 });
                             }
@@ -313,6 +375,8 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     });
     let gen_worker = generation.clone();
     std::thread::spawn(move || {
+        // One index connection for the life of the window, not one per keystroke.
+        let mut db: Option<rusqlite::Connection> = None;
         while let Ok((mut request_generation, mut query)) = job_rx.recv() {
             std::thread::sleep(Duration::from_millis(70));
             while let Ok((g, q)) = job_rx.try_recv() {
@@ -343,10 +407,11 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                 }
                 match utility::answers_local(&p, q, &c, || gen_worker.load(Ordering::Relaxed) != request_generation) {
                     Ok(answers) => {
-                        error = "↑ ↓ select · Enter copy · Esc close".into();
                         found.extend(answers.into_iter().map(|answer| ResultRow {
                             title: answer.title,
-                            detail: answer.detail,
+                            // Key hints live in the status bar, not in every row.
+                            folder: answer.detail.replace(" · Enter to copy", "").replace("Enter to copy answer", ""),
+                            reason: String::new(),
                             action: Action::Copy(answer.copy),
                         }));
                     }
@@ -355,7 +420,6 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                 let _ = tx.send(Reply { generation: request_generation, rows: found, append: false, status: error });
                 continue;
             }
-            let lower = q.to_lowercase();
             let mut matching_apps: Vec<_> = apps
                 .iter()
                 .filter_map(|(id, name, keywords)| {
@@ -365,29 +429,49 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                 .collect();
             matching_apps.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(b.1)));
             for (_, name, id) in matching_apps.into_iter().take(12) {
-                found.push(ResultRow { title: name.clone(), detail: "Application".into(), action: Action::App(id.clone()) });
+                found.push(ResultRow {
+                    title: name.clone(),
+                    folder: String::new(),
+                    reason: String::new(),
+                    action: Action::App(id.clone()),
+                });
             }
-            if let Ok(files) = index::search(&p, &c, q, 30) {
+            if db.is_none() {
+                db = index::open(&p).ok();
+            }
+            if let Some(conn) = &db
+                && let Ok(files) = index::search_in(conn, &c, q, 30)
+            {
                 for f in files {
                     found.push(ResultRow {
                         title: f.name,
-                        detail: f.path.display().to_string(),
+                        folder: folder_of(&f.path),
+                        reason: String::new(),
                         action: Action::File(f.path, Value::Null),
                     });
                 }
             }
-            if let Ok(hits) = index::content_search(&p, &c, q) {
+            if let Some(conn) = &db
+                && let Ok(hits) = index::content_search_in(conn, &p, &c, q)
+            {
                 for (file, info) in hits {
                     found.push(ResultRow {
                         title: file.name,
-                        detail: format!("Reader match · {}", file.path.display()),
+                        folder: folder_of(&file.path),
+                        reason: match_reason(&info),
                         action: Action::File(file.path, info),
                     });
                 }
             }
-            for (name, cmd) in [("Lock screen", "lock"), ("Reboot", "reboot"), ("Shut down", "shutdown")] {
-                if !q.is_empty() && name.to_lowercase().contains(&lower) {
-                    found.push(ResultRow { title: name.into(), detail: "System action".into(), action: Action::System(cmd) });
+            // Matched like app names, so a stray letter doesn't offer Reboot or Shut down.
+            for (name, cmd) in [("Lock screen", "lock"), ("Log out", "logout"), ("Reboot", "reboot"), ("Shut down", "shutdown")] {
+                if query::name_rank(name, q).is_some() {
+                    found.push(ResultRow {
+                        title: name.into(),
+                        folder: String::new(),
+                        reason: String::new(),
+                        action: Action::System(cmd),
+                    });
                 }
             }
             let _ = tx.send(Reply { generation: request_generation, rows: found, append: false, status: error });
@@ -433,15 +517,18 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     let rows_poll = rows.clone();
     let list_poll = list.clone();
     let footer_poll = footer.clone();
+    let count_poll = count.clone();
+    let content_poll = content.clone();
+    let empty_poll = empty.clone();
     let gen_poll = generation.clone();
-    let preview_poll = preview_box.clone();
+    let pane_poll = pane.root.clone();
     let window_weak = window.downgrade();
     glib::timeout_add_local(Duration::from_millis(25), move || {
         if window_weak.upgrade().is_none() {
             return glib::ControlFlow::Break;
         }
         if invalidated.swap(false, Ordering::Relaxed) {
-            preview_poll.set_visible(Paths::discover().load().is_ok_and(|c| c.preview));
+            pane_poll.set_visible(Paths::discover().load().is_ok_and(|c| c.preview));
             let g = gen_poll.fetch_add(1, Ordering::Relaxed) + 1;
             let _ = refresh_jobs.send((g, refresh_entry.text().to_string()));
         }
@@ -449,98 +536,93 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
             if reply.generation != gen_poll.load(Ordering::Relaxed) {
                 continue;
             }
-            // Late enrichment must never move the list under keyboard or mouse navigation.
+            // Late enrichment must never move the list under keyboard or mouse navigation:
+            // new results are added at the end, leaving the selection and scroll position alone.
             if browsing_poll.get() {
+                if !reply.status.is_empty() {
+                    footer_poll.set_text(&reply.status);
+                }
+                for result in reply.rows {
+                    if rows_poll.borrow().iter().any(|r| r.identity() == result.identity()) {
+                        continue;
+                    }
+                    rows_poll.borrow_mut().push(result.clone());
+                    list_poll.append(&result_row(&result));
+                }
+                count_poll.set_text(&count_text(rows_poll.borrow().len()));
                 continue;
             }
             if !reply.status.is_empty() {
                 footer_poll.set_text(&reply.status);
             }
-            let selected =
-                list_poll.selected_row().and_then(|r| rows_poll.borrow().get(r.index() as usize).map(ResultRow::identity));
             let mut merged = if reply.append { rows_poll.borrow().clone() } else { Vec::new() };
             for result in reply.rows {
                 if let Some(existing) = merged.iter_mut().find(|r| r.identity() == result.identity()) {
                     if matches!(&result.action, Action::File(_, hit) if !hit.is_null()) {
                         let mut result = result;
-                        if existing.category().1 != "Related results"
+                        // A file already listed by name keeps its place rather than moving to Related.
+                        if existing.category().0 != RELATED
                             && let Action::File(_, ref mut hit) = result.action
                         {
                             hit["related"] = false.into();
                         }
+                        result.reason = match &result.action {
+                            Action::File(_, hit) => match_reason(hit),
+                            _ => result.reason,
+                        };
                         *existing = result;
                     }
                 } else {
                     merged.push(result);
                 }
             }
-            // A lexical refresh arrives before enrichment. Keep the selected
-            // semantic/plugin result until that stage catches up.
-            if let Some(id) = selected.as_ref()
-                && !merged.iter().any(|r| &r.identity() == id)
-                && let Some(old) = rows_poll.borrow().iter().find(|r| &r.identity() == id)
-                && !matches!(&old.action, Action::File(path, _) if !path.exists())
-            {
-                merged.push(old.clone());
-            }
             merged.sort_by_key(|r| r.category().0);
+            if merged.is_empty() && reply.status.is_empty() {
+                show_empty(&empty_poll, refresh_entry.text().trim());
+                content_poll.set_visible_child_name("empty");
+            } else {
+                content_poll.set_visible_child_name("results");
+            }
+            count_poll.set_text(&count_text(merged.len()));
             let unchanged = {
                 let old = rows_poll.borrow();
                 old.len() == merged.len() && old.iter().zip(&merged).all(|(a, b)| {
-                    a.identity() == b.identity() && a.title == b.title && a.detail == b.detail
+                    a.identity() == b.identity() && a.title == b.title && a.folder == b.folder && a.reason == b.reason
                 })
             };
             if unchanged {
                 *rows_poll.borrow_mut() = merged;
                 continue;
             }
-            let scroll_position = scroll_poll.vadjustment().value();
             rebuild_poll.set(true);
             while let Some(child) = list_poll.first_child() {
                 list_poll.remove(&child);
             }
             *rows_poll.borrow_mut() = merged.clone();
             for result in &merged {
-                let line = gtk::Box::new(gtk::Orientation::Vertical, 2);
-                line.add_css_class("result");
-                let title = gtk::Label::new(Some(&result.title));
-                title.set_xalign(0.);
-                title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                let detail = gtk::Label::new(Some(&result.detail));
-                detail.add_css_class("dim-label");
-                detail.set_xalign(0.);
-                detail.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-                line.append(&title);
-                line.append(&detail);
-                let row = gtk::ListBoxRow::new();
-                row.set_child(Some(&line));
-                list_poll.append(&row);
+                list_poll.append(&result_row(result));
             }
-            let selected_index = selected.and_then(|id| merged.iter().position(|r| r.identity() == id)).unwrap_or(0);
-            list_poll.select_row(list_poll.row_at_index(selected_index as i32).as_ref());
+            // Nobody has navigated yet (that path returns above), so the top result is the
+            // one selected; otherwise Enter could act on a row sorted out of view.
+            list_poll.select_row(list_poll.row_at_index(0).as_ref());
             rebuild_poll.set(false);
-            // Notify once, after the selected file has been restored.
+            // Notify once, after the list is complete.
             list_poll.emit_by_name::<()>("row-selected", &[&list_poll.selected_row()]);
             let adjustment = scroll_poll.vadjustment();
-            glib::idle_add_local_once(move || adjustment.set_value(scroll_position));
-            if merged.is_empty() && reply.status.is_empty() {
-                footer_poll.set_text("No results");
-            }
+            glib::idle_add_local_once(move || adjustment.set_value(0.));
         }
         glib::ControlFlow::Continue
     });
     let jobs_entry = jobs.clone();
     let gen_entry = generation.clone();
     let footer_entry = footer.clone();
+    let count_entry = count.clone();
+    let hints_entry = hints.clone();
     let armed_entry = armed.clone();
     let content_entry = content.clone();
-    let preview_entry = preview_box.clone();
-    let calculator_entry = calculator.clone();
-    let preview_scroll_entry = preview_scroll.clone();
-    let picture_entry = picture.clone();
-    let media_entry = media.clone();
+    let status_entry = status_bar.clone();
+    let pane_entry = pane.clone();
     let playback_entry = playback.clone();
-    let display_entry = calculation_display.clone();
     let window_entry = window.clone();
     let list_entry = list.clone();
     let rows_entry = rows.clone();
@@ -549,13 +631,11 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         browsing_entry.set(false);
         let expanded = !e.text().trim().is_empty();
         let is_math = utility::intent(&e.text()) == utility::Intent::Calculation;
-        calculator_entry.set_visible(is_math);
-        preview_scroll_entry.set_visible(!is_math);
-        picture_entry.set_visible(false);
-        stop_playback(&media_entry, &playback_entry);
+        pane_entry.show_calculator(is_math);
+        stop_playback(&pane_entry.media, &playback_entry);
         if is_math {
             let c = Paths::discover().load().unwrap_or_default();
-            display_entry.set_text(
+            pane_entry.display.set_text(
                 &utility::answers(&e.text(), &c)
                     .ok()
                     .and_then(|a| a.into_iter().next())
@@ -564,36 +644,44 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
             );
         }
         content_entry.set_visible(expanded);
-        footer_entry.set_visible(expanded);
-        folder.set_visible(expanded);
-        plugin.set_visible(expanded);
-        preview_entry.set_visible(Paths::discover().load().is_ok_and(|c| c.preview));
-        window_entry.set_default_size(if expanded { 940 } else { 640 }, if expanded { 660 } else { 64 });
+        content_entry.set_visible_child_name("results");
+        // The bar's hairline only shows once there is something under it.
+        if let Some(frame) = content_entry.parent() {
+            if expanded { frame.add_css_class("expanded") } else { frame.remove_css_class("expanded") }
+        }
+        status_entry.set_visible(expanded);
+        pane_entry.root.set_visible(Paths::discover().load().is_ok_and(|c| c.preview));
+        window_entry.set_default_size(WIDTH, if expanded { EXPANDED } else { COLLAPSED });
         while let Some(child) = list_entry.first_child() {
             list_entry.remove(&child);
         }
         rows_entry.borrow_mut().clear();
         *armed_entry.borrow_mut() = None;
-        footer_entry.set_text("↑ ↓ select · Enter open · Ctrl+Enter reveal · Esc close");
+        footer_entry.set_text("");
+        count_entry.set_text("");
+        set_hints(&hints_entry, None);
         let g = gen_entry.fetch_add(1, Ordering::Relaxed) + 1;
         let _ = jobs_entry.send((g, e.text().to_string()));
     });
     let preview_gen = Arc::new(AtomicU64::new(0));
-    let (preview_tx, preview_rx) = mpsc::channel();
+    let (preview_tx, preview_rx) = mpsc::channel::<(u64, Preview)>();
     let rows_preview = rows.clone();
     let gen_preview = preview_gen.clone();
     let query_entry = entry.clone();
     let armed_preview = armed.clone();
-    let preview_label = preview.clone();
+    let footer_preview = footer.clone();
+    let hints_preview = hints.clone();
     let selected_preview = Rc::new(RefCell::new(None::<String>));
-    let picture_select = picture.clone();
-    let media_select = media.clone();
+    let pane_select = pane.clone();
     let playback_select = playback.clone();
     let window_select = window.clone();
     let entry_select = entry.clone();
     list.connect_row_selected(move |_, row| {
         if rebuilding.get() { return; }
-        *armed_preview.borrow_mut() = None;
+        // Moving away from a system action disarms it.
+        if armed_preview.borrow_mut().take().is_some() {
+            footer_preview.set_text("");
+        }
         if row.is_some() {
             let window = window_select.clone();
             let entry = entry_select.clone();
@@ -603,10 +691,14 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                 }
             });
         }
+        let pane = &pane_select;
         let Some(row) = row else {
             *selected_preview.borrow_mut() = None;
             gen_preview.fetch_add(1, Ordering::Relaxed);
-            stop_playback(&media_select, &playback_select);
+            stop_playback(&pane.media, &playback_select);
+            pane.card(&gio::ThemedIcon::new("system-search-symbolic").upcast(), "", "", true);
+            pane.clear_details();
+            set_hints(&hints_preview, None);
             return;
         };
         let Some(result) = rows_preview.borrow().get(row.index() as usize).cloned() else {
@@ -615,18 +707,53 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         let identity = result.identity();
         if selected_preview.borrow().as_ref() == Some(&identity) { return; }
         *selected_preview.borrow_mut() = Some(identity);
+        set_hints(&hints_preview, Some(&result.action));
         let g = gen_preview.fetch_add(1, Ordering::Relaxed) + 1;
-        preview_label.set_text("Loading preview…");
-        picture_select.set_visible(false);
-        stop_playback(&media_select, &playback_select);
-        if let Action::File(path, _) = &result.action {
-            let c = Paths::discover().load().unwrap_or_default();
-            if c.preview && config::allowed(&c, path) && let Some(is_video) = media_kind(path)
-                && let Some(player) = Player::new(path, is_video)
-            {
-                media_select.append(player.widget());
-                *playback_select.borrow_mut() = Some(player);
+        stop_playback(&pane.media, &playback_select);
+        pane.clear_details();
+        let icon = action_icon(&result.action);
+        match &result.action {
+            Action::App(id) => {
+                let app = APPS.with(|apps| apps.borrow().get(id).cloned());
+                let description = app.as_ref().and_then(|a| a.description()).map(|d| d.to_string()).unwrap_or_default();
+                pane.card(&icon, "", &description, false);
+                pane.add_detail("Kind", "Application");
+                if let Some(command) = app.and_then(|a| a.commandline()) {
+                    // Drop the desktop-entry field codes (%U, %f, …) from the command shown.
+                    let command = command.to_string_lossy().split_whitespace().filter(|w| !w.starts_with('%')).collect::<Vec<_>>().join(" ");
+                    pane.add_detail("Command", &command);
+                }
+                return;
             }
+            Action::Copy(value) => {
+                pane.card(&icon, &result.title, &result.folder, false);
+                pane.add_detail("Copies", value);
+                return;
+            }
+            Action::System(cmd) => {
+                pane.card(&icon, "", system_description(cmd), false);
+                return;
+            }
+            Action::File(path, _) => {
+                // Until the preview arrives, a dim icon holds the frame so it doesn't flash.
+                pane.card(&icon, "", "", true);
+                let c = Paths::discover().load().unwrap_or_default();
+                if c.preview && config::allowed(&c, path) && let Some(is_video) = media_kind(path)
+                    && let Some(player) = Player::new(path, is_video)
+                {
+                    if !is_video {
+                        let art = gtk::Image::from_gicon(&icon);
+                        art.set_pixel_size(64);
+                        art.set_vexpand(true);
+                        art.add_css_class("preview-card-icon");
+                        pane.media.append(&art);
+                    }
+                    pane.media.append(player.widget());
+                    pane.frame.set_visible_child_name("media");
+                    *playback_select.borrow_mut() = Some(player);
+                }
+            }
+            Action::Plugin(..) => pane.card(&icon, "", "", true),
         }
         let query = query_entry.text().to_string();
         if utility::intent(&query) == utility::Intent::Calculation {
@@ -634,31 +761,28 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         }
         let tx = preview_tx.clone();
         std::thread::spawn(move || {
-            let (text, img) = make_preview(&result, &query);
-            let markup = match &result.action {
-                Action::File(path, _) => code_markup(&text, path).unwrap_or_else(|| highlight(&text, &query)),
-                _ => highlight(&text, &query),
-            };
-            let _ = tx.send((g, markup, img));
+            let _ = tx.send((g, make_preview(&result, &query)));
         });
     });
-    let pic_poll = picture.clone();
+    let pane_poll = pane.clone();
     let win_weak = window.downgrade();
     glib::timeout_add_local(Duration::from_millis(35), move || {
         if win_weak.upgrade().is_none() {
             return glib::ControlFlow::Break;
         }
-        while let Ok((g, markup, img)) = preview_rx.try_recv() {
+        while let Ok((g, preview)) = preview_rx.try_recv() {
             if g != preview_gen.load(Ordering::Relaxed) {
                 continue;
             }
-            preview.set_markup(&markup);
-            pic_poll.set_visible(false);
-            if let Some(bytes) = img
-                && let Ok(texture) = gdk::Texture::from_bytes(&glib::Bytes::from(&bytes))
-            {
-                pic_poll.set_paintable(Some(&texture));
-                pic_poll.set_visible(true);
+            pane_poll.set_details(&preview.details);
+            match preview.body {
+                Body::Icon => pane_poll.card_icon.remove_css_class("dim"),
+                Body::Text(markup) => pane_poll.text(&markup),
+                Body::Image(bytes) => match gdk::Texture::from_bytes(&glib::Bytes::from(&bytes)) {
+                    Ok(texture) => pane_poll.image(&texture),
+                    Err(_) => pane_poll.card_icon.remove_css_class("dim"),
+                },
+                Body::Media => {}
             }
         }
         glib::ControlFlow::Continue
@@ -681,6 +805,7 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     let scroll_keys = scroll.clone();
     let browsing_keys = browsing.clone();
+    let playback_keys = playback.clone();
     let click = gtk::GestureClick::new();
     click.set_propagation_phase(gtk::PropagationPhase::Capture);
     click.connect_pressed(move |_, _, _, _| browsing.set(true));
@@ -690,28 +815,26 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
             gdk::Key::Escape => {
                 win_keys.set_visible(false);
             }
-            gdk::Key::Down | gdk::Key::Up => {
-                let current = list_keys.selected_row().map(|r| r.index());
-                let next = match (key == gdk::Key::Down, current) {
-                    (true, Some(index)) => index + 1,
-                    (false, Some(index)) => (index - 1).max(0),
-                    (_, None) => 0,
+            gdk::Key::Down | gdk::Key::Up | gdk::Key::Page_Down | gdk::Key::Page_Up => {
+                let last = rows_keys.borrow().len() as i32 - 1;
+                let step = match key {
+                    gdk::Key::Down => 1,
+                    gdk::Key::Up => -1,
+                    gdk::Key::Page_Down => 8,
+                    _ => -8,
                 };
-                if let Some(row) = list_keys.row_at_index(next) {
-                    browsing_keys.set(true);
-                    list_keys.select_row(Some(&row));
-                    if let Some(bounds) = row.compute_bounds(&list_keys) {
-                        let adj = scroll_keys.vadjustment();
-                        let y = bounds.y() as f64;
-                        let bottom = y + bounds.height() as f64;
-                        if y < adj.value() {
-                            adj.set_value(y.max(0.));
-                        } else if bottom > adj.value() + adj.page_size() {
-                            adj.set_value((bottom - adj.page_size()).min(adj.upper() - adj.page_size()).max(0.));
-                        }
-                    }
-                }
+                let next = list_keys.selected_row().map(|r| (r.index() + step).clamp(0, last.max(0))).unwrap_or(0);
+                select_and_reveal(&list_keys, &scroll_keys, &browsing_keys, next);
             }
+            // Plain Home/End stay with the search text; with Ctrl they jump through the results.
+            gdk::Key::Home | gdk::Key::End if mods.contains(gdk::ModifierType::CONTROL_MASK) => {
+                let last = rows_keys.borrow().len() as i32 - 1;
+                select_and_reveal(&list_keys, &scroll_keys, &browsing_keys, if key == gdk::Key::Home { 0 } else { last.max(0) });
+            }
+            gdk::Key::p if mods.contains(gdk::ModifierType::CONTROL_MASK) => match playback_keys.borrow().as_ref() {
+                Some(player) => player.toggle(),
+                None => return glib::Propagation::Proceed,
+            },
             gdk::Key::Return | gdk::Key::KP_Enter => {
                 if let Some(row) = list_keys.selected_row()
                     && let Some(result) = rows_keys.borrow().get(row.index() as usize)
@@ -719,12 +842,25 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                     activate(result, &win_keys, &footer_keys, &armed, mods.contains(gdk::ModifierType::CONTROL_MASK));
                 }
             }
-            gdk::Key::c if mods.contains(gdk::ModifierType::CONTROL_MASK) && !entry_keys.has_focus() => {
-                if let Some(row) = list_keys.selected_row()
-                    && let Some(result) = rows_keys.borrow().get(row.index() as usize)
-                {
-                    win_keys.clipboard().set_text(&result.title);
-                }
+            // With text selected in the search box Ctrl+C copies that; otherwise the selected result.
+            gdk::Key::c if mods.contains(gdk::ModifierType::CONTROL_MASK) && entry_keys.selection_bounds().is_none() => {
+                let Some(row) = list_keys.selected_row() else { return glib::Propagation::Proceed };
+                let Some(result) = rows_keys.borrow().get(row.index() as usize).cloned() else {
+                    return glib::Propagation::Proceed;
+                };
+                let text = match &result.action {
+                    Action::File(path, _) => path.display().to_string(),
+                    Action::Copy(value) => value.clone(),
+                    _ => result.title.clone(),
+                };
+                win_keys.clipboard().set_text(&text);
+                footer_keys.set_text("Copied");
+                let footer = footer_keys.clone();
+                glib::timeout_add_local_once(Duration::from_secs(2), move || {
+                    if footer.text() == "Copied" {
+                        footer.set_text("");
+                    }
+                });
             }
             _ => return glib::Propagation::Proceed,
         }
@@ -746,6 +882,286 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     if let Some(query) = query {
         entry.set_text(query);
     }
+}
+/// The right-hand pane: a framed content area, then a list of details. Every kind of
+/// result uses the same layout, so moving through results never reshuffles the pane.
+#[derive(Clone)]
+struct PreviewPane {
+    root: gtk::Box,
+    frame: gtk::Stack,
+    text: gtk::Label,
+    text_scroll: gtk::ScrolledWindow,
+    picture: gtk::Picture,
+    media: gtk::Box,
+    card_icon: gtk::Image,
+    card_title: gtk::Label,
+    card_desc: gtk::Label,
+    details: gtk::Grid,
+    detail_rows: Rc<std::cell::Cell<i32>>,
+    calculator: gtk::Box,
+    display: gtk::Label,
+}
+impl PreviewPane {
+    fn new(entry: &gtk::SearchEntry) -> Self {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 14);
+        root.add_css_class("preview");
+        root.set_hexpand(true);
+        let frame = gtk::Stack::new();
+        frame.add_css_class("preview-frame");
+        frame.set_vexpand(true);
+        frame.set_overflow(gtk::Overflow::Hidden);
+        let text = gtk::Label::new(None);
+        text.set_wrap(true);
+        text.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        text.set_xalign(0.);
+        text.set_yalign(0.);
+        text.add_css_class("preview-text");
+        let text_scroll = gtk::ScrolledWindow::builder()
+            .vscrollbar_policy(gtk::PolicyType::External)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .child(&text)
+            .build();
+        frame.add_named(&text_scroll, Some("text"));
+        let picture = gtk::Picture::new();
+        picture.set_can_shrink(true);
+        picture.set_content_fit(gtk::ContentFit::Contain);
+        picture.add_css_class("preview-picture");
+        frame.add_named(&picture, Some("image"));
+        let media = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        media.add_css_class("preview-media");
+        frame.add_named(&media, Some("media"));
+        let card = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        card.add_css_class("preview-card");
+        card.set_valign(gtk::Align::Center);
+        card.set_halign(gtk::Align::Center);
+        let card_icon = gtk::Image::new();
+        card_icon.set_pixel_size(64);
+        card.append(&card_icon);
+        let card_title = gtk::Label::new(None);
+        card_title.set_wrap(true);
+        card_title.set_justify(gtk::Justification::Center);
+        card_title.set_selectable(false);
+        card_title.add_css_class("preview-card-title");
+        card.append(&card_title);
+        let card_desc = gtk::Label::new(None);
+        card_desc.set_wrap(true);
+        card_desc.set_justify(gtk::Justification::Center);
+        card_desc.set_max_width_chars(42);
+        card_desc.add_css_class("preview-card-desc");
+        card.append(&card_desc);
+        frame.add_named(&card, Some("card"));
+        let details = gtk::Grid::builder().row_spacing(6).column_spacing(18).build();
+        details.add_css_class("preview-details");
+        let (calculator, display) = calculator_preview(entry);
+        calculator.set_visible(false);
+        calculator.set_vexpand(true);
+        root.append(&frame);
+        root.append(&details);
+        root.append(&calculator);
+        Self {
+            root,
+            frame,
+            text,
+            text_scroll,
+            picture,
+            media,
+            card_icon,
+            card_title,
+            card_desc,
+            details,
+            detail_rows: Rc::new(std::cell::Cell::new(0)),
+            calculator,
+            display,
+        }
+    }
+    fn show_calculator(&self, on: bool) {
+        self.frame.set_visible(!on);
+        self.details.set_visible(!on);
+        self.calculator.set_visible(on);
+    }
+    /// A large icon with an optional title and line of text, for results with nothing
+    /// else to show. A dim icon is the placeholder while a preview loads.
+    fn card(&self, icon: &gio::Icon, title: &str, desc: &str, dim: bool) {
+        self.card_icon.set_from_gicon(icon);
+        self.card_icon.set_css_classes(if dim { &["preview-card-icon", "dim"][..] } else { &["preview-card-icon"][..] });
+        self.card_title.set_text(title);
+        self.card_title.set_visible(!title.is_empty());
+        self.card_desc.set_text(desc);
+        self.card_desc.set_visible(!desc.is_empty());
+        self.frame.set_visible_child_name("card");
+    }
+    fn text(&self, markup: &str) {
+        self.text.set_markup(markup);
+        self.text_scroll.vadjustment().set_value(0.);
+        self.frame.set_visible_child_name("text");
+    }
+    fn image(&self, texture: &gdk::Texture) {
+        self.picture.set_paintable(Some(texture));
+        self.frame.set_visible_child_name("image");
+    }
+    fn clear_details(&self) {
+        while let Some(child) = self.details.first_child() {
+            self.details.remove(&child);
+        }
+        self.detail_rows.set(0);
+    }
+    fn add_detail(&self, key: &str, value: &str) {
+        let row = self.detail_rows.get();
+        let k = gtk::Label::new(Some(key));
+        k.set_xalign(0.);
+        k.set_valign(gtk::Align::Start);
+        k.add_css_class("detail-key");
+        let v = gtk::Label::new(Some(value));
+        v.set_xalign(0.);
+        v.set_hexpand(true);
+        // A folder keeps its end; anything else keeps its start.
+        v.set_ellipsize(if key == "Folder" { gtk::pango::EllipsizeMode::Start } else { gtk::pango::EllipsizeMode::End });
+        v.set_tooltip_text(Some(value));
+        v.add_css_class("detail-value");
+        self.details.attach(&k, 0, row, 1, 1);
+        self.details.attach(&v, 1, row, 1, 1);
+        self.detail_rows.set(row + 1);
+    }
+    fn set_details(&self, details: &[(String, String)]) {
+        self.clear_details();
+        for (key, value) in details {
+            self.add_detail(key, value);
+        }
+    }
+}
+/// What the preview thread hands back: the content to frame, and the details below it.
+enum Body {
+    /// Nothing to show beyond the details: the frame shows the result's icon.
+    Icon,
+    /// Pango markup for the text frame.
+    Text(String),
+    /// An encoded image (a picture, a PDF page, a video still).
+    Image(Vec<u8>),
+    /// Leave the inline player that was attached on selection.
+    Media,
+}
+struct Preview {
+    body: Body,
+    details: Vec<(String, String)>,
+}
+thread_local! {static APPS: RefCell<std::collections::HashMap<String, gio::AppInfo>> = RefCell::new(Default::default());}
+fn action_icon(action: &Action) -> gio::Icon {
+    let icon = match action {
+        Action::App(id) => APPS.with(|apps| apps.borrow().get(id).and_then(|app| app.icon())),
+        Action::File(path, _) => {
+            Some(gio::content_type_get_symbolic_icon(&content_type(path)))
+        }
+        _ => None,
+    };
+    icon.unwrap_or_else(|| gio::ThemedIcon::new(symbolic_icon(action)).upcast())
+}
+const RELATED: u8 = 5;
+fn count_text(n: usize) -> String {
+    match n {
+        0 => String::new(),
+        1 => "1 result".into(),
+        n => format!("{n} results"),
+    }
+}
+fn system_description(cmd: &str) -> &'static str {
+    match cmd {
+        "lock" => "Lock the screen and turn off the display.",
+        "logout" => "Log out after closing application windows.",
+        "reboot" => "Restart after closing application windows.",
+        _ => "Shut down after closing application windows.",
+    }
+}
+fn show_empty(slot: &gtk::Box, query: &str) {
+    while let Some(child) = slot.first_child() {
+        slot.remove(&child);
+    }
+    slot.append(&nixe_ui::widgets::empty_state(
+        "system-search-symbolic",
+        &format!("No results for “{query}”"),
+        "Try fewer or different words, or add a folder to search.",
+        None,
+    ));
+}
+/// The status bar's key hints for what Enter and the shortcuts do to this result.
+fn set_hints(hints: &gtk::Box, action: Option<&Action>) {
+    while let Some(child) = hints.first_child() {
+        hints.remove(&child);
+    }
+    let enter: &[&str] = &["Enter"];
+    let list: Vec<(&[&str], &str)> = match action {
+        Some(Action::File(path, _)) => {
+            let mut list = vec![(enter, "Open"), (&["Ctrl", "Enter"][..], "Reveal"), (&["Ctrl", "C"][..], "Copy")];
+            if media_kind(path).is_some() {
+                list.push((&["Ctrl", "P"][..], "Play"));
+            }
+            list
+        }
+        Some(Action::App(_)) => vec![(enter, "Launch")],
+        Some(Action::Copy(_)) => vec![(enter, "Copy")],
+        Some(Action::System("lock")) => vec![(enter, "Lock")],
+        Some(Action::System(_)) => vec![(enter, "Run")],
+        Some(Action::Plugin(..)) => vec![(enter, "Open")],
+        None => vec![],
+    };
+    for (keys, label) in list {
+        let hint = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        hint.append(&nixe_ui::widgets::key_caps(keys));
+        hint.append(&gtk::Label::new(Some(label)));
+        hints.append(&hint);
+    }
+}
+fn symbolic_icon(action: &Action) -> &'static str {
+    match action {
+        Action::App(_) => "application-x-executable-symbolic",
+        Action::File(..) => "text-x-generic-symbolic",
+        Action::Copy(_) => "accessories-calculator-symbolic",
+        Action::System("lock") => "system-lock-screen-symbolic",
+        Action::System("logout") => "system-log-out-symbolic",
+        Action::System("reboot") => "system-reboot-symbolic",
+        Action::System(_) => "system-shutdown-symbolic",
+        Action::Plugin(..) => "application-x-addon-symbolic",
+    }
+}
+/// Apps show their own icon; files the symbolic icon for their type.
+fn result_icon(action: &Action) -> gtk::Image {
+    gtk::Image::from_gicon(&action_icon(action))
+}
+fn result_row(result: &ResultRow) -> gtk::ListBoxRow {
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    line.add_css_class("result");
+    let icon = result_icon(&result.action);
+    icon.set_pixel_size(20);
+    icon.set_valign(gtk::Align::Center);
+    icon.add_css_class(if matches!(result.action, Action::App(_)) { "result-app-icon" } else { "result-icon" });
+    line.append(&icon);
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 1);
+    text.set_hexpand(true);
+    text.set_valign(gtk::Align::Center);
+    let title = gtk::Label::new(Some(&result.title));
+    title.set_xalign(0.);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    title.add_css_class("result-title");
+    text.append(&title);
+    if !result.folder.is_empty() {
+        let folder = gtk::Label::new(Some(&result.folder));
+        folder.set_xalign(0.);
+        // A folder keeps its end, which is what tells two README.md files apart.
+        let file = matches!(result.action, Action::File(..));
+        folder.set_ellipsize(if file { gtk::pango::EllipsizeMode::Start } else { gtk::pango::EllipsizeMode::End });
+        folder.add_css_class("result-folder");
+        text.append(&folder);
+    }
+    line.append(&text);
+    if !result.reason.is_empty() {
+        line.append(&nixe_ui::widgets::tag(&result.reason, if result.reason == "Related" { "" } else { "accent" }));
+    }
+    let row = gtk::ListBoxRow::new();
+    row.add_css_class(if result.folder.is_empty() { "single" } else { "double" });
+    if let Action::File(path, _) = &result.action {
+        row.set_tooltip_text(Some(&path.display().to_string()));
+    }
+    row.set_child(Some(&line));
+    row
 }
 fn calculator_preview(entry: &gtk::SearchEntry) -> (gtk::Box, gtk::Label) {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
@@ -819,120 +1235,192 @@ fn calculator_preview(entry: &gtk::SearchEntry) -> (gtk::Box, gtk::Label) {
     root.append(&copy);
     (root, display)
 }
-fn make_preview(result: &ResultRow, _query: &str) -> (String, Option<Vec<u8>>) {
+/// Builds a file or plugin preview off the main thread. Apps, utilities and system
+/// actions are previewed directly on selection.
+fn make_preview(result: &ResultRow, query: &str) -> Preview {
+    let note = |text: &str| Preview { body: Body::Text(glib::markup_escape_text(text).to_string()), details: vec![] };
     let p = Paths::discover();
     let Ok(c) = p.load() else {
-        return ("Invalid preferences".into(), None);
+        return note("Glimpse's preferences could not be read.");
     };
-    if !c.preview {
-        return ("Previews disabled".into(), None);
-    }
     match &result.action {
         Action::File(path, hit) => {
             if !config::allowed(&c, path) {
-                return ("Source no longer permitted".into(), None);
+                return note("This folder is no longer searched.");
             }
             let Ok(meta) = path.metadata() else {
-                return ("File unavailable".into(), None);
+                return note("This file is no longer available.");
             };
-            let description = format!(
-                "{}\n{} bytes\n{}",
-                path.display(),
-                meta.len(),
-                if hit.is_null() { String::new() } else { format!("Match: {}", hit["info"]) }
-            );
-            let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
-            if let Some(is_video) = media_kind(path) {
-                if crate::player::available() {
-                    return (description, None);
-                }
-                return media_preview(path, is_video, description);
-            }
-            if ext == "pdf" {
-                let mut image_cmd = Command::new("pdftoppm");
-                let page = hit["info"]["page"].as_u64().unwrap_or(1).max(1).to_string();
-                image_cmd.args(["-f", &page, "-l", &page, "-singlefile", "-scale-to", "700", "-png"]).arg(path);
-                if let Ok(bytes) = nixe_glimpse::process::capture(image_cmd, vec![], Duration::from_secs(3), 4 * 1024 * 1024) {
-                    return (description, Some(bytes));
-                }
-                let mut cmd = Command::new("pdftotext");
-                let page = hit["info"]["page"]
-                    .as_u64()
-                    .or_else(|| hit["loc"].as_f64().map(|n| n as u64))
-                    .unwrap_or(1)
-                    .max(1)
-                    .to_string();
-                cmd.args(["-f", &page, "-l", &page, "--"]).arg(path).arg("-");
-                if let Ok(bytes) = nixe_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 65536) {
-                    return (format!("{description}\n\n{}", String::from_utf8_lossy(&bytes)), None);
-                }
-            }
-            if ["png", "jpg", "jpeg", "webp", "gif", "heic", "heif", "bmp", "tiff", "tif", "svg", "avif"].contains(&ext.as_str()) {
-                let mut cmd = Command::new("ffmpeg");
-                cmd.args(["-v", "error", "-threads", "1", "-i"]).arg(path).args([
-                    "-frames:v",
-                    "1",
-                    "-vf",
-                    "scale=512:512:force_original_aspect_ratio=decrease",
-                    "-f",
-                    "image2pipe",
-                    "-vcodec",
-                    "png",
-                    "-",
-                ]);
-                if let Ok(bytes) = nixe_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 2 * 1024 * 1024) {
-                    return (description, Some(bytes));
-                }
-            }
-            if ["docx", "odt", "pptx", "xlsx", "ods", "odp"].contains(&ext.as_str()) {
-                let member = match ext.as_str() {
-                    "docx" => "word/document.xml",
-                    "pptx" => "ppt/slides/slide*.xml",
-                    "xlsx" => "xl/sharedStrings.xml",
-                    _ => "content.xml",
-                };
-                let mut cmd = Command::new("unzip");
-                cmd.arg("-p").arg(path).arg(member);
-                if let Ok(bytes) = nixe_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 2 * 1024 * 1024) {
-                    let mut text = String::new();
-                    let mut tag = false;
-                    for ch in String::from_utf8_lossy(&bytes).chars() {
-                        match ch {
-                            '<' => { tag = true; text.push(' '); }
-                            '>' => tag = false,
-                            _ if !tag => text.push(ch),
-                            _ => {}
-                        }
-                    }
-                    return (format!("{description}\n\n{}", text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").chars().take(16000).collect::<String>()), None);
-                }
-            }
-            if let Ok(f) = std::fs::File::open(path) {
-                let mut bytes = Vec::new();
-                if f.take(65536).read_to_end(&mut bytes).is_ok() && !bytes.contains(&0) {
-                    return (format!("{description}\n\n{}", String::from_utf8_lossy(&bytes)), None);
-                }
-            }
-            (format!("{description}\n\nNo inline preview is available for this file type. Press Enter to open it in its application."), None)
+            let mut details = file_details(path, &meta, hit);
+            let body = file_body(path, hit, query, &mut details);
+            Preview { body, details }
         }
-        Action::Copy(_) => (format!("{}\n\n{}", result.title, result.detail), None),
         Action::Plugin(id, result_id, _) => {
-            if let Ok(plugin) = plugins::get(&p, id)
-                && plugin.manifest.capabilities.contains(&"preview".into())
-                && let Ok(v) = plugins::call(
-                    &p,
-                    id,
-                    "preview",
-                    "preview",
-                    json!({"result_id":result_id,"title":result.title,"query":_query}),
-                )
-            {
-                return (v["text"].as_str().unwrap_or("No preview").chars().take(16000).collect(), None);
+            let plugin = plugins::get(&p, id).ok();
+            let mut details = vec![("Plugin".to_string(), plugin.as_ref().map_or(id.clone(), |p| p.manifest.name.clone()))];
+            if !result.folder.is_empty() {
+                details.insert(0, ("Result".into(), result.folder.clone()));
             }
-            (result.detail.clone(), None)
+            let text = plugin
+                .filter(|plugin| plugin.manifest.capabilities.contains(&"preview".into()))
+                .and_then(|_| {
+                    plugins::call(&p, id, "preview", "preview", json!({"result_id":result_id,"title":result.title,"query":query})).ok()
+                })
+                .and_then(|v| v["text"].as_str().map(|s| s.chars().take(16000).collect::<String>()));
+            Preview { body: text.map_or(Body::Icon, |t| Body::Text(highlight(&t, query))), details }
         }
-        _ => (result.detail.clone(), None),
+        _ => Preview { body: Body::Icon, details: vec![] },
     }
+}
+/// Kind, size, date, folder and where the match is: never the name, which the list shows.
+fn file_details(path: &Path, meta: &std::fs::Metadata, hit: &Value) -> Vec<(String, String)> {
+    let kind = gio::content_type_get_description(&content_type(path)).to_string();
+    let mut chars = kind.chars();
+    let kind = chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or(kind);
+    let mut details = vec![("Kind".to_string(), kind)];
+    if meta.is_file() {
+        details.push(("Size".into(), glib::format_size(meta.len()).to_string()));
+    }
+    if let Ok(modified) = meta.modified() {
+        details.push(("Modified".into(), when(modified)));
+    }
+    details.push(("Folder".into(), folder_of(path)));
+    if let Some(place) = match_place(hit) {
+        details.push(("Match".into(), place));
+    } else if hit["related"] == true {
+        details.push(("Match".into(), "Similar meaning".into()));
+    } else if !hit.is_null() {
+        details.push(("Match".into(), "In the contents".into()));
+    }
+    details
+}
+/// "Today, 14:02", "Yesterday, 09:15", "Oct 12" or "Oct 12, 2024".
+fn when(time: std::time::SystemTime) -> String {
+    let secs = time.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let (Ok(at), Ok(now)) = (glib::DateTime::from_unix_local(secs), glib::DateTime::now_local()) else {
+        return String::new();
+    };
+    let yesterday = now.add_days(-1).map(|d| d.ymd()).ok();
+    let format = if at.ymd() == now.ymd() {
+        "Today, %H:%M"
+    } else if Some(at.ymd()) == yesterday {
+        "Yesterday, %H:%M"
+    } else if at.year() == now.year() {
+        "%b %-d"
+    } else {
+        "%b %-d, %Y"
+    };
+    at.format(format).map(|s| s.to_string()).unwrap_or_default()
+}
+fn capture_image(cmd: Command) -> Option<Vec<u8>> {
+    nixe_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 6 * 1024 * 1024).ok().filter(|b| !b.is_empty())
+}
+fn file_body(path: &Path, hit: &Value, query: &str, details: &mut Vec<(String, String)>) -> Body {
+    let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
+    if let Some(is_video) = media_kind(path) {
+        if let Some(seconds) = media_length(path) {
+            details.insert(2, ("Length".into(), clock(seconds)));
+        }
+        if crate::player::available() {
+            return Body::Media;
+        }
+        // Without libmpv: a still from a few seconds in, past any black intro.
+        if is_video {
+            for seek in ["5", "0"] {
+                let mut cmd = Command::new("ffmpeg");
+                cmd.args(["-v", "error", "-threads", "1", "-ss", seek, "-i"]).arg(path).args([
+                    "-frames:v", "1", "-vf", "scale=800:800:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "-",
+                ]);
+                if let Some(bytes) = capture_image(cmd) {
+                    return Body::Image(bytes);
+                }
+            }
+        }
+        return Body::Icon;
+    }
+    if ext == "pdf" {
+        let page = hit["info"]["page"]
+            .as_u64()
+            .or_else(|| hit["loc"].as_f64().filter(|_| hit["kind"] == "pdf").map(|n| n as u64))
+            .unwrap_or(1)
+            .max(1)
+            .to_string();
+        let mut image = Command::new("pdftoppm");
+        image.args(["-f", &page, "-l", &page, "-singlefile", "-scale-to", "800", "-png"]).arg(path);
+        if let Some(bytes) = capture_image(image) {
+            return Body::Image(bytes);
+        }
+        let mut cmd = Command::new("pdftotext");
+        cmd.args(["-f", &page, "-l", &page, "--"]).arg(path).arg("-");
+        if let Ok(bytes) = nixe_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 65536) {
+            return text_body(&String::from_utf8_lossy(&bytes), path, hit, query);
+        }
+        return Body::Icon;
+    }
+    if ["png", "jpg", "jpeg", "webp", "gif", "heic", "heif", "bmp", "tiff", "tif", "svg", "avif"].contains(&ext.as_str()) {
+        if let Some((_, width, height)) = gtk::gdk_pixbuf::Pixbuf::file_info(path) {
+            details.insert(1, ("Dimensions".into(), format!("{width} × {height}")));
+        }
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args(["-v", "error", "-threads", "1", "-i"]).arg(path).args([
+            "-frames:v", "1", "-vf", "scale=800:800:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "-",
+        ]);
+        return capture_image(cmd).map_or(Body::Icon, Body::Image);
+    }
+    if ["docx", "odt", "pptx", "xlsx", "ods", "odp"].contains(&ext.as_str()) {
+        let member = match ext.as_str() {
+            "docx" => "word/document.xml",
+            "pptx" => "ppt/slides/slide*.xml",
+            "xlsx" => "xl/sharedStrings.xml",
+            _ => "content.xml",
+        };
+        let mut cmd = Command::new("unzip");
+        cmd.arg("-p").arg(path).arg(member);
+        if let Ok(bytes) = nixe_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 2 * 1024 * 1024) {
+            let text = semantic::strip_markup(&String::from_utf8_lossy(&bytes));
+            // Office XML has no line breaks worth keeping; collapse the runs of spaces.
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            return text_body(&text, path, hit, query);
+        }
+        return Body::Icon;
+    }
+    if let Ok(f) = std::fs::File::open(path) {
+        let mut bytes = Vec::new();
+        if f.take(65536).read_to_end(&mut bytes).is_ok() && !bytes.is_empty() && !bytes.contains(&0) {
+            return text_body(&String::from_utf8_lossy(&bytes), path, hit, query);
+        }
+    }
+    Body::Icon
+}
+/// The passage that matched: the hit's line, the semantic excerpt, or the first line
+/// with the search word; the start of the file when nothing points elsewhere.
+fn text_body(text: &str, path: &Path, hit: &Value, query: &str) -> Body {
+    let keyword = query.split_whitespace().find(|s| s.chars().count() >= 3).unwrap_or("").to_lowercase();
+    let line_hit = hit["info"]["line"]
+        .as_u64()
+        .or_else(|| hit["loc"].as_f64().filter(|_| hit["segment"] == "lines").map(|n| n as u64))
+        .map(|n| n as usize);
+    let keyword_line = (!keyword.is_empty())
+        .then(|| text.to_lowercase().find(&keyword).map(|at| text.to_lowercase()[..at].matches('\n').count() + 1))
+        .flatten();
+    let from_line = |line: usize| text.lines().skip(line.saturating_sub(3)).collect::<Vec<_>>().join("\n");
+    let excerpt = if let Some(line) = line_hit {
+        from_line(line)
+    } else if let Some(line) = keyword_line {
+        from_line(line)
+    } else if let Some(excerpt) = hit["excerpt"].as_str() {
+        excerpt.to_string()
+    } else {
+        text.to_string()
+    };
+    let excerpt: String = excerpt.trim_start_matches('\n').chars().take(12000).collect();
+    Body::Text(code_markup(&excerpt, path).unwrap_or_else(|| highlight(&excerpt, query)))
+}
+fn media_length(path: &Path) -> Option<f64> {
+    let mut probe = Command::new("ffprobe");
+    probe.args(["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"]).arg(path);
+    let bytes = nixe_glimpse::process::capture(probe, vec![], Duration::from_secs(2), 256).ok()?;
+    String::from_utf8_lossy(&bytes).trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.)
 }
 fn activate(
     result: &ResultRow,
@@ -957,7 +1445,8 @@ fn activate(
                     Ok(action) => activate(
                         &ResultRow {
                             title: String::new(),
-                            detail: String::new(),
+                            folder: String::new(),
+                            reason: String::new(),
                             action: Action::Plugin(id.clone(), result_id.clone(), action),
                         },
                         &window,
@@ -995,7 +1484,7 @@ fn activate(
             Action::System(cmd) => {
                 if cmd != "lock" && armed.borrow().as_deref() != Some(cmd) {
                     *armed.borrow_mut() = Some(cmd.into());
-                    status.set_text("Press Enter again to confirm this system action.");
+                    status.set_text("Press Enter again to confirm");
                     return Ok(());
                 }
                 Command::new("omarchy").args(["system", cmd]).spawn()?;
@@ -1034,7 +1523,7 @@ fn open_file(path: &Path, hit: &Value, reveal: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     let uri = gio::File::for_path(path).uri();
-    let (content_type, _) = gio::content_type_guess(Some(path), None::<&[u8]>);
+    let content_type = content_type(path);
     if let Some(app) = gio::AppInfo::default_for_type(&content_type, false)
         && let Some(id) = app.id()
     {
@@ -1120,10 +1609,36 @@ fn highlight(text: &str, query: &str) -> String {
     if keyword.is_empty() {
         return glib::markup_escape_text(text).to_string();
     }
-    text.split(keyword)
-        .map(|s| glib::markup_escape_text(s).to_string())
-        .collect::<Vec<_>>()
-        .join(&format!("<b>{}</b>", glib::markup_escape_text(keyword)))
+    // Match regardless of case, but show the text as it is written.
+    let needle: Vec<char> = keyword.chars().flat_map(char::to_lowercase).collect();
+    let match_at = |start: usize| {
+        let mut matched = 0;
+        for (offset, ch) in text[start..].char_indices() {
+            for lower in ch.to_lowercase() {
+                if needle.get(matched) != Some(&lower) {
+                    return None;
+                }
+                matched += 1;
+            }
+            if matched == needle.len() {
+                return Some(start + offset + ch.len_utf8());
+            }
+        }
+        None
+    };
+    let mut out = String::new();
+    let (mut plain, mut at) = (0, 0);
+    while let Some(ch) = text[at..].chars().next() {
+        if let Some(end) = match_at(at) {
+            out.push_str(&glib::markup_escape_text(&text[plain..at]));
+            out.push_str(&format!("<b>{}</b>", glib::markup_escape_text(&text[at..end])));
+            (plain, at) = (end, end);
+        } else {
+            at += ch.len_utf8();
+        }
+    }
+    out.push_str(&glib::markup_escape_text(&text[plain..]));
+    out
 }
 fn close_controls(window: &gtk::ApplicationWindow, root: &gtk::Box) {
     let close = gtk::Button::with_label("Close");
@@ -1325,6 +1840,13 @@ fn rebuild_plugin_manager(app: &gtk::Application, win: &gtk::ApplicationWindow) 
             text.set_xalign(0.);
             text.set_wrap(true);
             row.append(&text);
+            if let Some(error) = plugins::last_error(&Paths::discover(), &plugin.manifest.id) {
+                let label = gtk::Label::new(Some(&format!("Last error: {error}")));
+                label.add_css_class("dim-label");
+                label.set_xalign(0.);
+                label.set_wrap(true);
+                row.append(&label);
+            }
             let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
             for (label, op) in [
                 (if plugin.grant.enabled { "Disable" } else { "Enable · approve listed permissions" }, "toggle"),
@@ -1332,11 +1854,10 @@ fn rebuild_plugin_manager(app: &gtk::Application, win: &gtk::ApplicationWindow) 
                 ("Rollback", "rollback"),
                 ("Remove", "remove"),
             ] {
-                let button = gtk::Button::with_label(label);
                 let id = plugin.manifest.id.clone();
                 let enabled = plugin.grant.enabled;
                 let st = status.clone();
-                button.connect_clicked(move |_| {
+                let run = move || {
                     let id = id.clone();
                     run_task(st.clone(), move || {
                         let p = Paths::discover();
@@ -1357,7 +1878,15 @@ fn rebuild_plugin_manager(app: &gtk::Application, win: &gtk::ApplicationWindow) 
                         }
                         Ok("Plugin updated.".into())
                     });
-                });
+                };
+                // Removing deletes the package, so it takes the suite's two clicks.
+                let button = if op == "remove" {
+                    nixe_ui::widgets::two_click(label, "Click again to remove", run)
+                } else {
+                    let button = gtk::Button::with_label(label);
+                    button.connect_clicked(move |_| run());
+                    button
+                };
                 actions.append(&button);
             }
             row.append(&actions);
@@ -1581,89 +2110,119 @@ fn plugin_settings(app: &gtk::Application, id: &str) {
     });
 }
 
-/// Without libmpv there is no inline player: show a still frame and the running time.
 fn stop_playback(slot: &gtk::Box, playback: &RefCell<Option<Player>>) {
     if let Some(player) = playback.borrow_mut().take() {
         slot.remove(player.widget());
     }
 }
-fn media_preview(path: &Path, is_video: bool, description: String) -> (String, Option<Vec<u8>>) {
-    let mut probe = Command::new("ffprobe");
-    probe.args(["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"]).arg(path);
-    let description = match nixe_glimpse::process::capture(probe, vec![], Duration::from_secs(2), 256)
-        .ok()
-        .and_then(|b| String::from_utf8_lossy(&b).trim().parse::<f64>().ok())
-    {
-        Some(secs) => {
-            let secs = secs.round() as u64;
-            let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
-            let length = if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") };
-            format!("{}\nLength: {length}", description.trim_end())
-        }
-        None => description,
-    };
-    if !is_video {
-        return (description, None);
+/// The file's type from its name, except that a `.ts` file which isn't an MPEG transport
+/// stream is TypeScript, so it neither looks like nor opens as a video.
+fn content_type(path: &Path) -> String {
+    let typescript = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ts")) && media_kind(path).is_none();
+    if typescript {
+        return "application/typescript".into();
     }
-    // Skip into the video past black intro frames; short clips fall back to the start.
-    for seek in ["5", "0"] {
-        let mut cmd = Command::new("ffmpeg");
-        cmd.args(["-v", "error", "-threads", "1", "-ss", seek, "-i"]).arg(path).args([
-            "-frames:v",
-            "1",
-            "-vf",
-            "scale=640:360:force_original_aspect_ratio=decrease",
-            "-f",
-            "image2pipe",
-            "-vcodec",
-            "png",
-            "-",
-        ]);
-        if let Ok(bytes) = nixe_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 4 * 1024 * 1024)
-            && !bytes.is_empty()
-        {
-            return (description, Some(bytes));
-        }
-    }
-    (description, None)
+    gio::content_type_guess(Some(path), None::<&[u8]>).0.to_string()
 }
 fn media_kind(path: &Path) -> Option<bool> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    if ["mp4", "mkv", "webm", "mov", "avi", "m4v", "mpeg", "mpg", "ogv", "ts"].contains(&ext.as_str()) {
+    if ["mp4", "mkv", "webm", "mov", "avi", "m4v", "mpeg", "mpg", "ogv"].contains(&ext.as_str()) {
         Some(true)
+    } else if ext == "ts" {
+        // .ts is far more often TypeScript; a transport stream starts with the 0x47 sync byte.
+        let mut first = [0u8; 1];
+        let is_stream = std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut first)).is_ok() && first[0] == 0x47;
+        is_stream.then_some(true)
     } else if ["mp3", "wav", "flac", "ogg", "opus", "m4a", "aac", "aiff", "wma"].contains(&ext.as_str()) {
         Some(false)
     } else { None }
 }
-fn code_markup(text: &str, path: &Path) -> Option<String> {
-    use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet, util::LinesWithEndings};
-    thread_local! {
-        static SYNTAXES: SyntaxSet = SyntaxSet::load_defaults_newlines();
-        static THEMES: ThemeSet = ThemeSet::load_defaults();
+/// Syntax colours drawn from the Nixe palette rather than a fixed editor theme, so code
+/// previews match every theme: the accent for structure, dim italics for comments.
+fn code_markup(code: &str, path: &Path) -> Option<String> {
+    use std::{str::FromStr, sync::OnceLock};
+    use syntect::{
+        easy::HighlightLines,
+        highlighting::{Color, FontStyle, ScopeSelectors, StyleModifier, Theme, ThemeItem, ThemeSettings},
+        parsing::SyntaxSet,
+        util::LinesWithEndings,
+    };
+    static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
+    let ss = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
+    let syntax = ss.find_syntax_by_extension(path.extension()?.to_str()?)?;
+    if syntax.name == "Plain Text" {
+        return None;
     }
-    let ext = path.extension()?.to_str()?;
-    let (description, code) = text.split_once("\n\n")?;
-    SYNTAXES.with(|ss| {
-        let syntax = ss.find_syntax_by_extension(ext)?;
-        THEMES.with(|themes| {
-            let mut highlighter = HighlightLines::new(syntax, &themes.themes[if nixe_theme::current_palette().light { "InspiredGitHub" } else { "base16-ocean.dark" }]);
-            let mut markup = format!("{}\n\n<span font_family=\"monospace\">", glib::markup_escape_text(description));
-            for line in LinesWithEndings::from(code) {
-                for (style, token) in highlighter.highlight_line(line, ss).ok()? {
-                    let c = style.foreground;
-                    markup.push_str(&format!("<span foreground=\"#{:02x}{:02x}{:02x}\">{}</span>", c.r, c.g, c.b, glib::markup_escape_text(token)));
-                }
-            }
-            markup.push_str("</span>");
-            Some(markup)
-        })
-    })
+    let palette = nixe_theme::current_palette();
+    let color = |hex: &str| {
+        let v = u32::from_str_radix(hex.trim_start_matches('#').get(..6)?, 16).ok()?;
+        Some(Color { r: (v >> 16) as u8, g: (v >> 8) as u8, b: v as u8, a: 255 })
+    };
+    let item = |scope: &str, hex: &str, style: FontStyle| ThemeItem {
+        scope: ScopeSelectors::from_str(scope).unwrap_or_default(),
+        style: StyleModifier { foreground: color(hex), background: None, font_style: Some(style) },
+    };
+    let (accent, dim) = (palette.accent.as_str(), palette.dim_text.as_str());
+    let theme = Theme {
+        settings: ThemeSettings { foreground: color(&palette.text), ..Default::default() },
+        scopes: vec![
+            item("comment, punctuation.definition.comment, markup.quote", dim, FontStyle::ITALIC),
+            item("keyword, storage, constant.numeric, constant.language, entity.name.type, support.type", accent, FontStyle::empty()),
+            item("markup.heading, entity.name.section, punctuation.definition.heading", accent, FontStyle::BOLD),
+            item("markup.raw, markup.inline.raw, markup.underline.link, punctuation.definition.list_item", accent, FontStyle::empty()),
+            item("entity.name.function, markup.bold", &palette.text, FontStyle::BOLD),
+            item("markup.italic", &palette.text, FontStyle::ITALIC),
+        ],
+        ..Default::default()
+    };
+    let mut highlighter = HighlightLines::new(syntax, &theme);
+    let mut markup = String::new();
+    for line in LinesWithEndings::from(code) {
+        for (style, token) in highlighter.highlight_line(line, ss).ok()? {
+            let c = style.foreground;
+            let weight = if style.font_style.contains(FontStyle::BOLD) { " weight=\"bold\"" } else { "" };
+            let slant = if style.font_style.contains(FontStyle::ITALIC) { " style=\"italic\"" } else { "" };
+            markup.push_str(&format!(
+                "<span foreground=\"#{:02x}{:02x}{:02x}\"{weight}{slant}>{}</span>",
+                c.r,
+                c.g,
+                c.b,
+                glib::markup_escape_text(token)
+            ));
+        }
+    }
+    Some(markup)
 }
 pub fn dismiss() {
     PANEL.with(|p| { if let Some(window) = p.borrow().as_ref() { window.set_visible(false); } });
 }
 
+/// Select a result by index and scroll just enough to show it.
+fn select_and_reveal(list: &gtk::ListBox, scroll: &gtk::ScrolledWindow, browsing: &std::cell::Cell<bool>, index: i32) {
+    let Some(row) = list.row_at_index(index) else { return };
+    browsing.set(true);
+    list.select_row(Some(&row));
+    if let Some(bounds) = row.compute_bounds(list) {
+        let adj = scroll.vadjustment();
+        let y = bounds.y() as f64;
+        let bottom = y + bounds.height() as f64;
+        if y < adj.value() {
+            adj.set_value(y.max(0.));
+        } else if bottom > adj.value() + adj.page_size() {
+            adj.set_value((bottom - adj.page_size()).min(adj.upper() - adj.page_size()).max(0.));
+        }
+    }
+}
 fn navigate_result(list: &gtk::ListBox, direction: i32) {
     let next = list.selected_row().map(|row| (row.index() + direction).max(0)).unwrap_or(0);
     if let Some(row) = list.row_at_index(next) { list.select_row(Some(&row)); }
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn highlight_ignores_case_and_keeps_text() {
+        assert_eq!(super::highlight("The Report & report", "report"), "The <b>Report</b> &amp; <b>report</b>");
+        assert_eq!(super::highlight("Ärger ÄRGER", "ärger"), "<b>Ärger</b> <b>ÄRGER</b>");
+        assert_eq!(super::highlight("abc", "zz"), "abc");
+    }
 }

@@ -270,7 +270,7 @@ impl Drop for State {
 /// One loaded file, paused on its first frame. Dropping it stops playback.
 pub struct Player {
     root: gtk::Box,
-    _state: Rc<State>,
+    state: Rc<State>,
 }
 
 impl Player {
@@ -310,7 +310,8 @@ impl Player {
 
         let picture = gtk::Picture::new();
         picture.set_can_shrink(true);
-        picture.set_size_request(480, 270);
+        // Small enough to fit the preview pane; it grows to fill the frame.
+        picture.set_size_request(160, 90);
         picture.set_hexpand(true);
         picture.set_vexpand(true);
         picture.set_visible(is_video);
@@ -405,10 +406,15 @@ impl Player {
             }
             None => glib::ControlFlow::Break,
         });
-        Some(Player { root, _state: state })
+        Some(Player { root, state })
     }
 
     pub fn widget(&self) -> &gtk::Box {
         &self.root
+    }
+
+    /// Play or pause; at the end of the file, play again from the start.
+    pub fn toggle(&self) {
+        self.state.toggle();
     }
 }

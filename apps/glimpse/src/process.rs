@@ -6,6 +6,20 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+/// Runs an expensive check (reading settings or plugin manifests) at most once per
+/// `every`, for loops that poll cancellation every few milliseconds. Once it reports
+/// true it stays true.
+pub fn throttled(every: Duration, check: impl Fn() -> bool) -> impl Fn() -> bool {
+    let last = std::cell::Cell::new(None::<Instant>);
+    let cached = std::cell::Cell::new(false);
+    move || {
+        if !cached.get() && last.get().is_none_or(|t| t.elapsed() >= every) {
+            cached.set(check());
+            last.set(Some(Instant::now()));
+        }
+        cached.get()
+    }
+}
 /// Bounded process capture. Kill the entire process group on timeout/output excess.
 pub fn capture(cmd: Command, input: Vec<u8>, timeout: Duration, limit: usize) -> Result<Vec<u8>> {
     capture_cancel(cmd, input, timeout, limit, || false)

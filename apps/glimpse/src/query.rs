@@ -42,6 +42,16 @@ pub fn fts(q: &str) -> String {
         .collect::<Vec<_>>()
         .join(" AND ")
 }
+/// For searching contents: every word exactly (no prefix), and when there are several,
+/// within a few words of each other.
+pub fn fts_near(q: &str) -> String {
+    let terms: Vec<String> = terms(q).iter().map(|t| format!("\"{}\"", t.text.replace('"', "\"\""))).collect();
+    match terms.len() {
+        0 => String::new(),
+        1 => terms[0].clone(),
+        _ => format!("NEAR({}, 5)", terms.join(" ")),
+    }
+}
 pub fn name_rank(name: &str, q: &str) -> Option<u8> {
     let name = name.to_lowercase();
     let requested = terms(q);

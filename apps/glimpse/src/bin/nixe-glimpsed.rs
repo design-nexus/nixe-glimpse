@@ -48,6 +48,8 @@ fn run() -> anyhow::Result<()> {
     watcher.watch(&p.config, RecursiveMode::NonRecursive)?;
     let mut watched: Vec<std::path::PathBuf> = Vec::new();
     let mut last = Instant::now() - Duration::from_secs(60);
+    // File events mark the index stale; otherwise a full rescan only every ten minutes.
+    let mut due = true;
     loop {
         let c = p.load()?;
         if c.roots != watched {
@@ -58,17 +60,21 @@ fn run() -> anyhow::Result<()> {
                 let _ = watcher.watch(root, RecursiveMode::Recursive);
             }
             watched = c.roots.clone();
-            last = Instant::now() - Duration::from_secs(60);
+            due = true;
         }
-        if !c.paused && !gated(&c) && last.elapsed() >= Duration::from_secs(2) {
+        let blocked = c.paused || gated(&c);
+        if due && !blocked && last.elapsed() >= Duration::from_secs(2) {
+            due = false;
             let report = index::scan(&p, &c)?;
             if let Err(e) = index::refresh_readers(&p, &c) {
                 atomic_write(&p.state.join("reader-error"), e.to_string().as_bytes())?;
             }
             atomic_write(&p.state.join("index-status.json"), &serde_json::to_vec(&report)?)?;
             if c.semantic {
-                match semantic::index(&p) {
-                    Ok(()) => {
+                match semantic::index_scanned(&p) {
+                    Ok(more) => {
+                        // Keep working through large files instead of waiting for the next rescan.
+                        due |= more;
                         let _ = fs::remove_file(p.state.join("semantic-error"));
                     }
                     Err(e) => atomic_write(&p.state.join("semantic-error"), e.to_string().as_bytes())?,
@@ -76,12 +82,19 @@ fn run() -> anyhow::Result<()> {
             }
             last = Instant::now();
         }
+        if due && !blocked {
+            // More to do: continue after a short breather rather than waiting for an event.
+            std::thread::sleep(Duration::from_secs(2));
+            while rx.try_recv().is_ok() {}
+            continue;
+        }
         match rx.recv_timeout(Duration::from_secs(30)) {
             Ok(()) => {
                 std::thread::sleep(Duration::from_millis(300));
                 while rx.try_recv().is_ok() {}
+                due = true;
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => last = Instant::now() - Duration::from_secs(60),
+            Err(mpsc::RecvTimeoutError::Timeout) => due |= last.elapsed() >= Duration::from_secs(600),
             Err(_) => break,
         }
     }

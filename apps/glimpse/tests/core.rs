@@ -109,6 +109,53 @@ fn unmounted_root_does_not_prune() {
     assert_eq!(count, 1);
 }
 #[test]
+fn unreadable_subfolder_does_not_hide_the_source() {
+    let (_t, p, c) = fixture();
+    fs::write(c.roots[0].join("report.txt"), "x").unwrap();
+    let locked = c.roots[0].join("locked");
+    fs::create_dir(&locked).unwrap();
+    fs::write(locked.join("inside.txt"), "x").unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let result = index::scan(&p, &c);
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(result.unwrap()["unavailable"].as_array().unwrap().is_empty());
+    assert_eq!(index::search(&p, &c, "report", 20).unwrap().len(), 1);
+}
+#[test]
+fn failed_documents_wait_until_they_change() {
+    let (_t, p, mut c) = fixture();
+    let broken = c.roots[0].join("empty.docx");
+    fs::write(&broken, "").unwrap();
+    c.semantic = true;
+    c.battery_pause = false;
+    p.save(&c).unwrap();
+    semantic::index(&p).unwrap();
+    let db = rusqlite::Connection::open(p.data.join("semantic-index/glimpse.sqlite")).unwrap();
+    let status = |db: &rusqlite::Connection| -> (String, String) {
+        db.query_row("SELECT status,error FROM documents", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+    };
+    assert_eq!(status(&db).0, "error");
+    db.execute("UPDATE documents SET error='marker'", []).unwrap();
+    semantic::index(&p).unwrap();
+    assert_eq!(status(&db), ("error".into(), "marker".into()), "unchanged file was retried");
+    // A changed file gets another attempt.
+    std::thread::sleep(Duration::from_millis(1100));
+    fs::write(&broken, "still not a zip").unwrap();
+    semantic::index(&p).unwrap();
+    assert_ne!(status(&db).1, "marker");
+}
+#[test]
+fn broken_plugin_is_skipped_and_reported() {
+    let (_t, p, _c) = fixture();
+    let broken = p.data.join("plugins/broken");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(broken.join("plugin.toml"), "not = [valid").unwrap();
+    plugins::install_builtin(&p).unwrap();
+    let listed = plugins::list(&p).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert!(plugins::last_error(&p, "broken").unwrap().contains("invalid plugin.toml"));
+}
+#[test]
 fn fts_input_is_literal_and_wal_readable() {
     let (_t, p, c) = fixture();
     fs::write(c.roots[0].join("report.txt"), "x").unwrap();
@@ -149,8 +196,13 @@ fn integration_preserves_edits_and_rejects_tampering() {
 fn settings_pages_parse_in_both_real_hosts() {
     let (_t, p, _) = fixture();
     let value = nixe_glimpse::settings::describe(&p, "glimpse").unwrap();
-    assert_eq!(value["groups"].as_array().unwrap().len(), 5);
-    assert!(value["groups"].as_array().unwrap().iter().filter(|g| g["title"] != "General").all(|g| g["collapsible"] == true));
+    let titles: Vec<_> = value["groups"].as_array().unwrap().iter().map(|g| g["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["General", "Shortcuts", "Sources", "Local AI", "Plugins", "Appearance"]);
+    // Only long groups collapse; short ones stay open.
+    for group in value["groups"].as_array().unwrap() {
+        let long = group["rows"].as_array().unwrap().len() > 3;
+        assert_eq!(group["collapsible"] == true, long, "{}", group["title"]);
+    }
     for group in value["groups"].as_array().unwrap() {
         for row in group["rows"].as_array().unwrap() {
             if row["kind"] == "info" {

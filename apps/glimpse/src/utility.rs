@@ -5,6 +5,9 @@ struct Parser<'a> {
     s: &'a [u8],
     i: usize,
     depth: usize,
+    // The last power ended in a postfix percent, and the last term was only that.
+    percent: bool,
+    term_percent: bool,
 }
 impl Parser<'_> {
     fn ws(&mut self) {
@@ -24,10 +27,13 @@ impl Parser<'_> {
     fn expr(&mut self) -> Result<f64> {
         let mut n = self.term()?;
         loop {
+            // "150 + 10%" adds ten percent of the left-hand side, as calculators do.
             if self.eat(b'+') {
-                n += self.term()?;
+                let t = self.term()?;
+                n += if self.term_percent { n * t } else { t };
             } else if self.eat(b'-') {
-                n -= self.term()?;
+                let t = self.term()?;
+                n -= if self.term_percent { n * t } else { t };
             } else {
                 break;
             }
@@ -36,6 +42,7 @@ impl Parser<'_> {
     }
     fn term(&mut self) -> Result<f64> {
         let mut n = self.power()?;
+        let mut pure = std::mem::take(&mut self.percent);
         loop {
             if self.eat(b'*') {
                 n *= self.power()?;
@@ -46,8 +53,27 @@ impl Parser<'_> {
             } else {
                 break;
             }
+            pure = false;
         }
+        self.percent = false;
+        self.term_percent = pure;
         Ok(n)
+    }
+    /// A "%" with no operand after it is a percentage; "7 % 3" stays a remainder.
+    fn postfix_percent(&mut self) -> bool {
+        self.ws();
+        if self.s.get(self.i) != Some(&b'%') {
+            return false;
+        }
+        let mut next = self.i + 1;
+        while self.s.get(next).is_some_and(u8::is_ascii_whitespace) {
+            next += 1;
+        }
+        if self.s.get(next).is_some_and(|b| b.is_ascii_digit() || *b == b'.' || *b == b'(') {
+            return false;
+        }
+        self.i += 1;
+        true
     }
     fn power(&mut self) -> Result<f64> {
         self.depth += 1;
@@ -60,7 +86,13 @@ impl Parser<'_> {
             self.power()?
         } else {
             let n = self.atom()?;
-            if self.eat(b'^') { n.powf(self.power()?) } else { n }
+            let n = if self.eat(b'^') { n.powf(self.power()?) } else { n };
+            if self.postfix_percent() {
+                self.percent = true;
+                n / 100.
+            } else {
+                n
+            }
         };
         self.depth -= 1;
         Ok(n)
@@ -88,7 +120,7 @@ pub fn calculate(s: &str) -> Result<f64> {
     if s.len() > 512 {
         bail!("expression too long");
     }
-    let mut p = Parser { s: s.as_bytes(), i: 0, depth: 0 };
+    let mut p = Parser { s: s.as_bytes(), i: 0, depth: 0, percent: false, term_percent: false };
     let n = p.expr()?;
     p.ws();
     if p.i != p.s.len() || !n.is_finite() {
@@ -186,6 +218,7 @@ pub fn normalize_math(q: &str) -> String {
         .unwrap_or(q.trim())
         .trim()
         .trim_start_matches('=')
+        .replace("% of", "% *")
         .replace('×', "*")
         .replace('÷', "/")
         .replace('−', "-")
@@ -230,11 +263,22 @@ fn canonical_unit(s: &str) -> &str {
 }
 pub fn intent(q: &str) -> Intent {
     let parts = conversion_parts(q);
-    if parts.len() >= 2
-        && parts[0].parse::<f64>().is_ok()
-        && (unit(canonical_unit(&parts[1])).is_some() || parts.get(2).is_some_and(|p| p == "to" || p == "in"))
+    if parts.len() >= 2 && parts[0].parse::<f64>().is_ok() {
+        // Only "5 km" or "5 km to …" is a conversion; "2 in 1 laptop" and "4k wallpaper" are searches.
+        let target = parts.get(2).is_some_and(|p| p == "to" || p == "in");
+        let started = parts.len() == 2 && parts[1].chars().count() > 1 && unit(canonical_unit(&parts[1])).is_some();
+        if target || started {
+            return Intent::Conversion;
+        }
+    }
+    // Dates such as 2024-10-13 name files far more often than they ask for a subtraction.
+    let trimmed = q.trim();
+    let mut segments = trimmed.split('-');
+    if trimmed.contains('-')
+        && segments.next().is_some_and(|s| s.len() == 4 && s.bytes().all(|b| b.is_ascii_digit()))
+        && segments.all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
     {
-        return Intent::Conversion;
+        return Intent::Search;
     }
     let math = normalize_math(q);
     if q.trim().starts_with('=')
@@ -261,8 +305,12 @@ pub fn number(n: f64) -> String {
 pub fn pretty_math(q: &str) -> String {
     let mut out = String::new();
     let mut previous = None;
-    for ch in normalize_math(q).chars().filter(|c| !c.is_whitespace()) {
-        if "+-*/%^".contains(ch) && previous.is_some_and(|c| c != '(' && !"+-*/%^".contains(c)) {
+    let chars: Vec<char> = normalize_math(q).chars().filter(|c| !c.is_whitespace()).collect();
+    for (i, &ch) in chars.iter().enumerate() {
+        let postfix = ch == '%' && !chars.get(i + 1).is_some_and(|c| c.is_ascii_digit() || *c == '.' || *c == '(');
+        if postfix {
+            out.push(ch);
+        } else if "+-*/%^".contains(ch) && previous.is_some_and(|c| c != '(' && !"+-*/^".contains(c)) {
             out.push(' ');
             out.push(ch);
             out.push(' ');
@@ -371,5 +419,36 @@ pub fn answers(q: &str, c: &Config) -> Result<Vec<Answer>> {
                 }])
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn searches_are_not_mistaken_for_conversions_or_dates_for_sums() {
+        for q in ["2 in 1 laptop", "100 days of code", "4k wallpaper", "4k", "2024-10-13", "2024-10"] {
+            assert_eq!(intent(q), Intent::Search, "{q}");
+        }
+        for q in ["1 oz to lb", "5 km", "5km", "100 usd to eur", "3 ft in m"] {
+            assert_eq!(intent(q), Intent::Conversion, "{q}");
+        }
+        for q in ["2+2", "=2024-10-13", "20% of 150", "50%"] {
+            assert_eq!(intent(q), Intent::Calculation, "{q}");
+        }
+    }
+    #[test]
+    fn percentages_and_remainders() {
+        let calc = |q: &str| calculate(&normalize_math(q)).unwrap();
+        assert_eq!(calc("50%"), 0.5);
+        assert_eq!(calc("20% of 150"), 30.);
+        assert_eq!(calc("150 + 10%"), 165.);
+        assert_eq!(calc("150 - 10%"), 135.);
+        assert_eq!(calc("7 % 3"), 1.);
+        assert_eq!(calc("7%3"), 1.);
+        assert_eq!(calc("10% + 5"), 5.1);
+        assert_eq!(calc("200 * 5%"), 10.);
+        assert_eq!(pretty_math("20% of 150"), "20% * 150");
+        assert_eq!(pretty_math("7%3"), "7 % 3");
     }
 }

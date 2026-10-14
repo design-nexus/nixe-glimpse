@@ -37,15 +37,50 @@ fn walk(c: &Config, p: &Path, found: &mut Vec<(PathBuf, u64, u64)>) -> Result<()
         return Ok(());
     }
     let meta = fs::symlink_metadata(p)?;
-    if meta.file_type().is_symlink() {
-        return Ok(());
-    }
     if meta.is_dir() {
-        for entry in fs::read_dir(p)? {
-            walk(c, &entry?.path(), found)?;
-        }
+        walk_dir(c, p, found, true)?;
     } else if meta.is_file() {
         found.push((p.to_owned(), meta.modified()?.duration_since(UNIX_EPOCH)?.as_secs(), meta.len()));
+    }
+    Ok(())
+}
+/// Entries that can't be read or vanish mid-walk are skipped, so one locked folder
+/// doesn't leave the whole source unindexed. Only an unreadable root fails.
+fn skippable(e: &std::io::Error) -> bool {
+    matches!(e.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound)
+}
+fn walk_dir(c: &Config, dir: &Path, found: &mut Vec<(PathBuf, u64, u64)>, root: bool) -> Result<()> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if !root && skippable(&e) => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) if skippable(&e) => continue,
+            Err(e) => return Err(e.into()),
+        };
+        let path = entry.path();
+        // Ancestors were checked on the way down; only this name and the exclusions remain.
+        if config::forbidden_name(&entry.file_name()) || c.excluded.iter().any(|x| path.starts_with(x)) {
+            continue;
+        }
+        let kind = match entry.file_type() {
+            Ok(kind) => kind,
+            Err(e) if skippable(&e) => continue,
+            Err(e) => return Err(e.into()),
+        };
+        if kind.is_dir() {
+            walk_dir(c, &path, found, false)?;
+        } else if kind.is_file() {
+            let meta = match entry.metadata() {
+                Ok(meta) => meta,
+                Err(e) if skippable(&e) => continue,
+                Err(e) => return Err(e.into()),
+            };
+            found.push((path, meta.modified()?.duration_since(UNIX_EPOCH)?.as_secs(), meta.len()));
+        }
     }
     Ok(())
 }
@@ -96,7 +131,13 @@ pub fn search(paths: &Paths, c: &Config, q: &str, limit: usize) -> Result<Vec<Fi
     if q.trim().is_empty() {
         return Ok(vec![]);
     }
-    let conn = open(paths)?;
+    search_in(&open(paths)?, c, q, limit)
+}
+/// Like `search`, on a connection the caller keeps open between queries.
+pub fn search_in(conn: &Connection, c: &Config, q: &str, limit: usize) -> Result<Vec<FileHit>> {
+    if q.trim().is_empty() {
+        return Ok(vec![]);
+    }
     let expr = crate::query::fts(q);
     if expr.is_empty() {
         return Ok(vec![]);
@@ -141,9 +182,15 @@ pub fn refresh_readers(paths: &Paths, _c: &Config) -> Result<()> {
         .prepare("SELECT path,mtime,size FROM files")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
+    let mut current = paths.load()?;
+    let mut loaded = std::time::Instant::now();
     for plugin in plugins.into_iter().filter(|p| p.grant.enabled && p.manifest.capabilities.contains(&"reader".into())) {
         for (path, mtime, size) in &files {
-            let current = paths.load()?;
+            // Settings are re-read at most once a second, not once per file.
+            if loaded.elapsed() >= std::time::Duration::from_secs(1) {
+                current = paths.load()?;
+                loaded = std::time::Instant::now();
+            }
             if current.paused {
                 return Ok(());
             }
@@ -197,7 +244,13 @@ pub fn content_search(paths: &Paths, c: &Config, q: &str) -> Result<Vec<(FileHit
     if q.trim().is_empty() {
         return Ok(vec![]);
     }
-    let conn = open(paths)?;
+    content_search_in(&open(paths)?, paths, c, q)
+}
+/// Like `content_search`, on a connection the caller keeps open between queries.
+pub fn content_search_in(conn: &Connection, paths: &Paths, c: &Config, q: &str) -> Result<Vec<(FileHit, serde_json::Value)>> {
+    if q.trim().is_empty() {
+        return Ok(vec![]);
+    }
     let expr = crate::query::fts(q);
     if expr.is_empty() {
         return Ok(vec![]);

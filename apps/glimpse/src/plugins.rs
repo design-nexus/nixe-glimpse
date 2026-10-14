@@ -105,7 +105,14 @@ pub fn list(p: &Paths) -> Result<Vec<Plugin>> {
         {
             continue;
         }
-        let manifest = load(&entry.path())?;
+        // One broken package must not take search, readers and the manager down with it.
+        let manifest = match load(&entry.path()) {
+            Ok(manifest) => manifest,
+            Err(e) => {
+                let _ = record_error(p, &entry.file_name().to_string_lossy(), &format!("invalid plugin.toml: {e:#}"));
+                continue;
+            }
+        };
         let grant = reg.get(&manifest.id).cloned().unwrap_or_default();
         result.push(Plugin { manifest, grant, dir: entry.path() });
     }
@@ -410,23 +417,23 @@ fn sandbox(p: &Paths, plugin: &Plugin, read_one: Option<&Path>) -> Result<Comman
     };
     cmd.arg(exe).args(&plugin.manifest.exec[1..]);
     // Hide default secrets/generated paths and explicit exclusions even inside granted folders.
-    fn masks(root: &Path, cfg: &config::Config, out: &mut Vec<(PathBuf, bool)>) -> Result<()> {
-        for entry in fs::read_dir(root)? {
-            let entry = entry?;
+    // Folders the user can't read are skipped: the sandbox can't read them either.
+    fn masks(root: &Path, cfg: &config::Config, out: &mut Vec<(PathBuf, bool)>) {
+        let Ok(entries) = fs::read_dir(root) else { return };
+        for entry in entries.flatten() {
             let path = entry.path();
-            let kind = entry.file_type()?;
+            let Ok(kind) = entry.file_type() else { continue };
             if config::forbidden(&path) || cfg.excluded.iter().any(|p| path.starts_with(p)) {
                 out.push((path, kind.is_dir()));
             } else if kind.is_dir() {
-                masks(&path, cfg, out)?;
+                masks(&path, cfg, out);
             }
         }
-        Ok(())
     }
     let mut denied = Vec::new();
     for root in &scopes {
         if root.is_dir() {
-            masks(root, &cfg, &mut denied)?;
+            masks(root, &cfg, &mut denied);
         }
     }
     // Mount exclusions must precede the executable separator.
@@ -476,19 +483,17 @@ pub fn call_cancel(p: &Paths, id: &str, capability: &str, op: &str, args: Value,
         json!({"api_version":1,"id":2,"op":"shutdown"})
     );
 
+    let revoked = process::throttled(Duration::from_millis(250), || {
+        get(p, id).is_ok_and(|now| {
+            !now.grant.enabled || now.grant.version != plugin.grant.version || now.grant.permissions != plugin.grant.permissions
+        })
+    });
     let out = process::capture_cancel(
         sandbox(p, &plugin, read_one)?,
         input.into_bytes(),
         Duration::from_secs(if op == "extract" { 10 } else { 2 }),
         1024 * 1024,
-        || {
-            cancelled()
-                || get(p, id).is_ok_and(|now| {
-                    !now.grant.enabled
-                        || now.grant.version != plugin.grant.version
-                        || now.grant.permissions != plugin.grant.permissions
-                })
-        },
+        || cancelled() || revoked(),
     )?;
     let messages: Vec<Value> =
         out.split(|b| *b == b'\n').filter(|l| !l.is_empty()).map(serde_json::from_slice).collect::<serde_json::Result<_>>()?;
@@ -507,6 +512,7 @@ pub fn call_cancel(p: &Paths, id: &str, capability: &str, op: &str, args: Value,
     if let Some(e) = reply.get("error") {
         bail!("plugin: {e}");
     }
+    let _ = fs::remove_file(p.state.join("plugin-errors").join(id));
     Ok(reply["result"].clone())
 }
 pub fn search(p: &Paths, q: &str) -> Vec<(String, Hit)> {
@@ -564,14 +570,19 @@ pub fn activate(p: &Paths, id: &str, token: &str) -> Result<Action> {
     }
     Ok(a)
 }
-pub fn record_error(p: &Paths, id: &str, _e: &str) -> Result<()> {
+pub fn record_error(p: &Paths, id: &str, e: &str) -> Result<()> {
     if !valid_id(id) {
         bail!("invalid plugin ID");
     }
-    config::atomic_write(
-        &p.state.join("plugin-errors").join(id),
-        b"Plugin request failed: timeout, invalid response, revoked permissions, or unavailable dependency.",
-    )
+    let message: String = e.chars().filter(|c| !c.is_control()).take(300).collect();
+    config::atomic_write(&p.state.join("plugin-errors").join(id), message.as_bytes())
+}
+/// The last recorded failure for a plugin, for display.
+pub fn last_error(p: &Paths, id: &str) -> Option<String> {
+    if !valid_id(id) {
+        return None;
+    }
+    fs::read_to_string(p.state.join("plugin-errors").join(id)).ok().filter(|s| !s.trim().is_empty())
 }
 pub fn catalog(p: &Paths, refresh: bool) -> Result<Vec<CatalogEntry>> {
     let cache = p.data.join("plugin-catalog.json");

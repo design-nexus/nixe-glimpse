@@ -1,15 +1,228 @@
-window.glimpse-window { background: @theme_bg; color: @theme_text; font-family: "JetBrains Mono"; font-size: 13px; }
-.search-toolbar { padding: 12px; border-bottom: 1px solid @hairline; }
-.result { padding: 10px 12px; }
-.dim-label { color: @theme_dim_text; font-size: 11px; }
-.preview { padding: 12px; border-left: 1px solid @hairline; }
-.footer { padding: 8px 12px; color: @theme_dim_text; border-top: 1px solid @hairline; font-size: 11px; }
-list { background: transparent; }
-row:selected { background: @nav_active; }
+/* Glimpse: a launcher on the suite's single flat surface (STYLE.md). Colours come from
+   the theme tokens only; sizes follow the suite's 4/6/10 radius and 2/4 spacing scales. */
 
-.glimpse-frame { padding: 1px; }
-.category-heading { padding: 8px 12px 4px; color: @theme_dim_text; font-weight: bold; }
-window.glimpse-window { border: 1px solid @theme_border; }
+window.glimpse-window {
+  background: @theme_bg;
+  color: @theme_text;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
+  font-weight: 500;
+  border: 1px solid @hairline;
+}
 
-.calculation-display { font-size: 18px; font-weight: bold; padding: 8px 0; }
-.calculator button { min-height: 28px; padding: 4px; }
+/* ---------- Search bar ---------- */
+
+.search-bar {
+  min-height: 54px;
+  padding: 0 16px;
+}
+
+.glimpse-frame.expanded .search-bar {
+  border-bottom: 1px solid @hairline;
+}
+
+window.glimpse-window entry.glimpse-search,
+window.glimpse-window entry.glimpse-search:focus-within {
+  min-height: 52px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  font-size: 1.15em;
+}
+
+window.glimpse-window entry.glimpse-search > image {
+  color: @theme_dim_text;
+  margin-right: 10px;
+}
+
+window.glimpse-window entry.glimpse-search > text > placeholder {
+  color: @theme_dim_text;
+}
+
+/* ---------- Results ---------- */
+
+list.results {
+  background: transparent;
+  padding: 4px 0 8px;
+}
+
+list.results > row {
+  min-height: 46px;
+  margin: 1px 6px;
+  padding: 0;
+  border-radius: 6px;
+  outline: none;
+  transition: background 150ms ease-out;
+}
+
+list.results > row.single {
+  min-height: 36px;
+}
+
+list.results > row:hover {
+  background: @row_hover;
+}
+
+list.results > row:selected {
+  background: @nav_active;
+  color: @theme_text;
+}
+
+.result {
+  padding: 5px 10px;
+}
+
+.result-icon {
+  color: @theme_dim_text;
+}
+
+list.results > row:selected .result-icon {
+  color: @theme_accent;
+}
+
+.result-folder {
+  font-size: 0.86em;
+  color: @theme_dim_text;
+}
+
+list.results > row:selected .result-folder {
+  color: mix(@theme_dim_text, @theme_text, 0.35);
+}
+
+.category-heading {
+  margin: 8px 6px 0;
+  padding: 12px 10px 6px;
+  border-top: 1px solid @hairline;
+  font-size: 0.76em;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: @theme_dim_text;
+}
+
+.category-heading.first {
+  margin-top: 0;
+  padding-top: 8px;
+  border-top: none;
+}
+
+/* ---------- Preview ---------- */
+
+.preview {
+  padding: 14px 16px;
+  border-left: 1px solid @hairline;
+}
+
+.preview-frame {
+  border: 1px solid @hairline;
+  border-radius: 10px;
+}
+
+.preview-text {
+  padding: 12px 14px;
+  font-size: 0.88em;
+}
+
+.preview-picture {
+  margin: 10px;
+}
+
+.preview-media {
+  padding: 10px;
+}
+
+.preview-card {
+  padding: 16px;
+}
+
+.preview-card-icon {
+  color: @theme_dim_text;
+}
+
+.preview-card-icon.dim {
+  opacity: 0.3;
+}
+
+.preview-card-title {
+  font-size: 1.25em;
+  font-weight: 600;
+}
+
+.preview-card-desc {
+  color: @theme_dim_text;
+}
+
+.preview-details {
+  padding: 0 4px;
+  font-size: 0.86em;
+}
+
+.detail-key {
+  min-width: 76px;
+  color: @theme_dim_text;
+}
+
+/* ---------- Media player ---------- */
+
+.player-controls {
+  padding: 6px 2px 0;
+}
+
+.player-controls label {
+  font-size: 0.86em;
+  font-feature-settings: "tnum";
+  color: @theme_dim_text;
+}
+
+window.glimpse-window .player-controls button {
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: @theme_dim_text;
+}
+
+window.glimpse-window .player-controls button:hover {
+  color: @theme_text;
+}
+
+/* ---------- Calculator ---------- */
+
+.calculation-display {
+  padding: 10px 4px 14px;
+  font-size: 1.5em;
+  font-weight: 600;
+}
+
+window.glimpse-window .calculator button {
+  min-height: 32px;
+  padding: 0;
+  border-radius: 6px;
+}
+
+/* ---------- Status bar ---------- */
+
+.status-hints {
+  color: @theme_dim_text;
+}
+
+.status-hints .key-cap {
+  min-height: 0;
+  padding: 0 5px;
+  font-size: 0.78em;
+  color: @theme_text;
+}
+
+.status-hints .dim {
+  margin: 0 -2px;
+}
+
+.status-message {
+  color: @theme_text;
+}
+
+.status-count {
+  margin-right: 10px;
+  font-feature-settings: "tnum";
+}
