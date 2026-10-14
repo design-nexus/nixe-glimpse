@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe/main/install.sh | bash -s -- music pdf
 #   curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe/main/install.sh | bash -s -- all
 #
-# Apps: settings tasks torrents pdf notepad music media-player chat fonts archive office photos
+# Apps: settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos
 # Options:
 #   --default  make the installed apps open their file types
 #   --gear     also add the Settings gear to the Omarchy bar (with settings)
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 REPO="design-nexus/nixe"
-ALL=(settings tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse)
+ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse)
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m==>\033[0m %s\n' "$*" >&2; }
@@ -26,6 +26,7 @@ app_info() {
   case $1 in
     settings) ids="Settings" old_bins="settings settings-helper"; bins="nixe-settings nixe-settings-helper" ;;
     glimpse) ids="Glimpse" bins="nixe-glimpse nixe-glimpsed nixe-glimpse-settings" deps="bubblewrap" ;;
+    contacts) ids="Contacts" defaults=true ;;
     tasks) ids="Tasks" old_bins="tasks" ;;
     torrents) ids="Torrents" old_bins="torrents" deps="libtorrent-rasterbar boost" defaults=true ;;
     pdf) ids="Pdf" old_bins="pdf" deps="poppler-glib" defaults=true ;;
