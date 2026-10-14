@@ -1,0 +1,11 @@
+id = "notes-reader"
+name = "Notes Reader"
+version = "0.1.0"
+api_version = 1
+description = "Index .note files as text; demonstrates custom file readers."
+exec = ["python3", "main.py"]
+needs = ["python3"]
+capabilities = ["reader", "settings"]
+file_types = ["note"]
+[permissions]
+selected_sources = true

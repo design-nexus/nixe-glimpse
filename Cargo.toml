@@ -3,7 +3,7 @@ resolver = "3"
 members = ["apps/*", "crates/*"]
 # Built on their own: the extensions (from a sparse clone on the user's machine)
 # and the assistant (CUDA and its own build settings).
-exclude = ["extensions", "apps/assistant"]
+exclude = ["extensions", "apps/assistant", "apps/glimpse/inference"]
 
 [workspace.package]
 edition = "2024"

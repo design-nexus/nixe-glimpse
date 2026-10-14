@@ -1,0 +1,15 @@
+window.glimpse-window { background: @theme_bg; color: @theme_text; font-family: "JetBrains Mono"; font-size: 13px; }
+.search-toolbar { padding: 12px; border-bottom: 1px solid @hairline; }
+.result { padding: 10px 12px; }
+.dim-label { color: @theme_dim_text; font-size: 11px; }
+.preview { padding: 12px; border-left: 1px solid @hairline; }
+.footer { padding: 8px 12px; color: @theme_dim_text; border-top: 1px solid @hairline; font-size: 11px; }
+list { background: transparent; }
+row:selected { background: @nav_active; }
+
+.glimpse-frame { padding: 1px; }
+.category-heading { padding: 8px 12px 4px; color: @theme_dim_text; font-weight: bold; }
+window.glimpse-window { border: 1px solid @theme_border; }
+
+.calculation-display { font-size: 18px; font-weight: bold; padding: 8px 0; }
+.calculator button { min-height: 28px; padding: 4px; }

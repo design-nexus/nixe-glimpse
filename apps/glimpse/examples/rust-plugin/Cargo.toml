@@ -1,0 +1,8 @@
+[package]
+name = "text-tools"
+version = "0.1.0"
+edition = "2024"
+[workspace]
+[dependencies]
+glimpse-plugin-sdk = { path = "../../../../crates/glimpse-plugin-sdk" }
+serde_json = "1"

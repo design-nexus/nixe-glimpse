@@ -1,0 +1,8 @@
+id = "quick-tools"
+name = "Quick Tools"
+version = "1.0.0"
+api_version = 1
+description = "Generate UUIDs and show the current UTC time. A small example plugin."
+exec = ["python3", "main.py"]
+capabilities = ["search"]
+needs = ["python3"]

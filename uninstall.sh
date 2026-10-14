@@ -5,7 +5,7 @@
 #   ./uninstall.sh all --purge        remove every app and its settings and data
 set -euo pipefail
 
-ALL=(settings tasks torrents pdf notepad music media-player chat fonts archive office photos)
+ALL=(settings tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse)
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[31m==>\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -33,6 +33,14 @@ for a in "${apps[@]}"; do
     pdf) bins="nixe-pdf" ids="Pdf" ;;
     *) bins="nixe-$a" ids="${a^}" ;;
   esac
+  if [[ $a == glimpse ]]; then
+    systemctl --user disable --now nixe-glimpsed.service 2>/dev/null || true
+    "$bin/nixe-glimpse" integration restore
+    rm -f "$config/systemd/user/nixe-glimpsed.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+    rm -rf "$share/nixe-settings/extensions/glimpse" "$share/settings/extensions/glimpse"
+    bins="nixe-glimpse nixe-glimpsed nixe-glimpse-settings"
+  fi
   say "Removing $a"
   for b in $bins; do pkill -x "$b" 2>/dev/null || true; rm -f "$bin/$b"; done
   for id in $ids; do
@@ -50,7 +58,7 @@ done
 
 # Floating-window rules for apps that are gone.
 hypr="$config/hypr/nixe.lua"
-if [[ -f $hypr ]]; then
+if [[ " ${apps[*]} " != " glimpse " && -f $hypr ]]; then
   [[ -x $bin/nixe-notepad ]] || sed -i '/nixe\\\\.Notepad/d' "$hypr"
   [[ -x $bin/nixe-archive ]] || sed -i '/nixe\\\\.Archive/d' "$hypr"
   if ! grep -q 'o\.window' "$hypr"; then
