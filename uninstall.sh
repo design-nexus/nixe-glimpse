@@ -5,7 +5,7 @@
 #   ./uninstall.sh all --purge        remove every app and its settings and data
 set -euo pipefail
 
-ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse)
+ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store)
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[31m==>\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -27,6 +27,7 @@ config="${XDG_CONFIG_HOME:-$HOME/.config}"
 for a in "${apps[@]}"; do
   case $a in
     settings) bins="nixe-settings nixe-settings-helper" ids="Settings" ;;
+    store) bins="nixe-store" ids="Store" ;;
     media-player) bins="nixe-media-player" ids="MediaPlayer" ;;
     office) bins="nixe-office nixe-write nixe-sheets nixe-present" ids="Write Sheets Present" ;;
     photos) bins="nixe-photos nixe-viewer" ids="Photos PhotoViewer" ;;
@@ -40,6 +41,10 @@ for a in "${apps[@]}"; do
     systemctl --user daemon-reload 2>/dev/null || true
     rm -rf "$share/nixe-settings/extensions/glimpse" "$share/settings/extensions/glimpse"
     bins="nixe-glimpse nixe-glimpsed nixe-glimpse-settings"
+  fi
+  if [[ $a == store ]]; then
+    sudo rm -f /usr/local/lib/nixe-store/nixe-store-helper /usr/share/polkit-1/actions/io.github.design_nexus.nixe.store.policy
+    # Keep root-owned source records even with --purge; reinstalling must not lose provenance.
   fi
   say "Removing $a"
   for b in $bins; do pkill -x "$b" 2>/dev/null || true; rm -f "$bin/$b"; done

@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe/main/install.sh | bash -s -- music pdf
 #   curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe/main/install.sh | bash -s -- all
 #
-# Apps: settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos
+# Apps: settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store
 # Options:
 #   --default  make the installed apps open their file types
 #   --gear     also add the Settings gear to the Omarchy bar (with settings)
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 REPO="design-nexus/nixe"
-ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse)
+ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store)
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m==>\033[0m %s\n' "$*" >&2; }
@@ -27,6 +27,7 @@ app_info() {
     settings) ids="Settings" old_bins="settings settings-helper"; bins="nixe-settings nixe-settings-helper" ;;
     glimpse) ids="Glimpse" bins="nixe-glimpse nixe-glimpsed nixe-glimpse-settings" deps="bubblewrap" ;;
     contacts) ids="Contacts" defaults=true ;;
+    store) ids="Store" bins="nixe-store nixe-store-helper" deps="pacman appstream libarchive polkit base-devel libjxl" ;;
     tasks) ids="Tasks" old_bins="tasks" ;;
     torrents) ids="Torrents" old_bins="torrents" deps="libtorrent-rasterbar boost" defaults=true ;;
     pdf) ids="Pdf" old_bins="pdf" deps="poppler-glib" defaults=true ;;
@@ -189,6 +190,15 @@ for a in "${apps[@]}"; do
     install -m 644 "$d/data/nixe-office.xml" "$share/mime/packages/"
     rm -f "$share/mime/packages/nexus-office.xml"
     update-mime-database "$share/mime" 2>/dev/null || true
+  fi
+
+  if [[ $a == store ]]; then
+    say "Installing Store's root-owned package helper and authorization policy"
+    sudo install -d -m 755 /usr/local/lib/nixe-store /var/lib/nixe-store
+    sudo install -m 755 "$src/target/release/nixe-store-helper" /usr/local/lib/nixe-store/nixe-store-helper
+    sudo install -m 644 "$d/data/io.github.design_nexus.nixe.store.policy" /usr/share/polkit-1/actions/io.github.design_nexus.nixe.store.policy
+    # The privileged entry point is never executed from a user-writable directory.
+    rm -f "$bin/nixe-store-helper"
   fi
 
   if [[ $a == glimpse ]]; then
