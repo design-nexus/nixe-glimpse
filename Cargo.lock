@@ -2299,6 +2299,7 @@ dependencies = [
  "anyhow",
  "gtk4",
  "serde",
+ "serde_json",
  "toml",
 ]
 
@@ -2396,6 +2397,7 @@ dependencies = [
  "nixe-theme",
  "nixe-ui",
  "serde",
+ "serde_json",
  "toml",
 ]
 
