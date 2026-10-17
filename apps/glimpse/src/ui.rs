@@ -875,6 +875,12 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         w.set_visible(false);
         glib::Propagation::Stop
     });
+    // A click elsewhere, or another window taking the keyboard, puts the launcher away.
+    window.connect_is_active_notify(|w| {
+        if !w.is_active() && w.is_visible() {
+            w.set_visible(false);
+        }
+    });
     PANEL.with(|p| *p.borrow_mut() = Some(window.clone()));
     window.present();
     focus_search(&window, &entry);

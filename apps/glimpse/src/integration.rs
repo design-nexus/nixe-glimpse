@@ -13,26 +13,8 @@ pub fn block_keys(shortcuts: bool, search_key: &str, menu_key: &str) -> String {
     let mut s = format!(
         "{START}\n-- Owned by Glimpse. Remove through Glimpse Settings.\no.window(\"^io\\\\.github\\\\.design_nexus\\\\.nixe\\\\.Glimpse$\", {{ float = true, center = true }})\n"
     );
-    s.push_str(r#"-- Retain keyboard focus only in the launcher; outside clicks dismiss it.
-o.window({ class = "^io\\.github\\.design_nexus\\.nixe\\.Glimpse$", title = "^Glimpse$" }, { stay_focused = true })
--- Observe clicks without consuming them.
-local function glimpse_outside_click()
-  for _, w in ipairs(hl.get_windows()) do
-    if w.class == "io.github.design_nexus.nixe.Glimpse" and w.title == "Glimpse" and w.visible then
-      local cursor, at, size = hl.get_cursor_pos(), w.at, w.size
-      local x, y = at.x or at[1], at.y or at[2]
-      local width, height = size.x or size[1], size.y or size[2]
-      if cursor and (cursor.x < x or cursor.y < y or cursor.x >= x + width or cursor.y >= y + height) then
-        hl.exec_cmd("nixe-glimpse --hide")
-      end
-      return
-    end
-  end
-end
-for _, button in ipairs({ "mouse:272", "mouse:273", "mouse:274" }) do
-  hl.bind(button, glimpse_outside_click, { non_consuming = true, ignore_mods = true, transparent = true })
-end
-"#);
+    // Nothing else: the launcher hides itself when it loses focus (`ui::present`), so no
+    // focus rule and no global mouse bindings are needed.
     if shortcuts {
         s.push_str("o.rebind(\"SUPER + SPACE\", \"Glimpse\", { launch = \"nixe-glimpse --toggle\" })\no.rebind(\"CTRL + SPACE\", \"Omarchy menu\", { menu = \"root\" })\n");
     }
