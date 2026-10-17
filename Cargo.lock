@@ -2438,6 +2438,7 @@ dependencies = [
  "poppler-rs",
  "rusqlite",
  "serde",
+ "serde_json",
  "toml",
 ]
 
