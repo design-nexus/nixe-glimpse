@@ -13,9 +13,6 @@ use std::{
 #[allow(dead_code)]
 #[path = "../../settings/src/ext/protocol.rs"]
 mod current_host;
-#[allow(dead_code)]
-#[path = "../../../../settings/src/ext/protocol.rs"]
-mod old_host;
 fn fixture() -> (tempfile::TempDir, Paths, Config) {
     let temp = tempfile::Builder::new().prefix("glimpse-test-").tempdir().unwrap();
     let p = Paths { config: temp.path().join("config"), data: temp.path().join("data"), state: temp.path().join("state") };
@@ -210,8 +207,7 @@ fn settings_pages_parse_in_both_real_hosts() {
             }
         }
     }
-    let _: current_host::PageDesc = serde_json::from_value(value.clone()).unwrap();
-    let _: old_host::PageDesc = serde_json::from_value(value).unwrap();
+    let _: current_host::PageDesc = serde_json::from_value(value).unwrap();
 }
 #[test]
 fn subprocess_limits_and_failures() {

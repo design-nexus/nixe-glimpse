@@ -828,13 +828,6 @@ fn decode_entities(text: &str) -> String {
     out.push_str(rest);
     out
 }
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn entities_decode_once() {
-        assert_eq!(super::strip_markup("<w:t>a &amp;lt; b &quot;c&apos; &#233;&#x41; &bogus; & x</w:t>"), " a &lt; b \"c' éA &bogus; & x ");
-    }
-}
 /// Scan the sources, then index their contents.
 pub fn index(p: &Paths) -> Result<()> {
     let cfg = p.load()?;
@@ -991,4 +984,12 @@ pub fn index_scanned(p: &Paths) -> Result<bool> {
     }
     let partial: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM documents WHERE status='partial')", [], |r| r.get(0))?;
     Ok(out_of_time || partial)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn entities_decode_once() {
+        assert_eq!(super::strip_markup("<w:t>a &amp;lt; b &quot;c&apos; &#233;&#x41; &bogus; & x</w:t>"), " a &lt; b \"c' éA &bogus; & x ");
+    }
 }

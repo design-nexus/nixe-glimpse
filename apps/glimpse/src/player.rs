@@ -76,6 +76,9 @@ const DURATION: u64 = 2;
 const PAUSE: u64 = 3;
 const EOF: u64 = 4;
 
+// Each `sym!` becomes the fn pointer type of the `Api` field it fills, which the macro
+// can't name.
+#[allow(clippy::missing_transmute_annotations)]
 fn api() -> Option<&'static Api> {
     static API: OnceLock<Option<Api>> = OnceLock::new();
     API.get_or_init(|| unsafe {
