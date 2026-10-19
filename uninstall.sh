@@ -5,7 +5,7 @@
 #   ./uninstall.sh all --purge        remove every app and its settings and data
 set -euo pipefail
 
-ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store)
+ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store git)
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[31m==>\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -45,6 +45,10 @@ for a in "${apps[@]}"; do
   if [[ $a == store ]]; then
     sudo rm -f /usr/local/lib/nixe-store/nixe-store-helper /usr/share/polkit-1/actions/io.github.design_nexus.nixe.store.policy
     # Keep root-owned source records even with --purge; reinstalling must not lose provenance.
+  fi
+  if [[ $a == git ]] && command -v pacman >/dev/null && pacman -Qq nixe-git >/dev/null 2>&1; then
+    if [[ -t 0 ]]; then sudo pacman -R --noconfirm nixe-git;
+    else pkexec pacman -R --noconfirm nixe-git; fi
   fi
   say "Removing $a"
   for b in $bins; do pkill -x "$b" 2>/dev/null || true; rm -f "$bin/$b"; done

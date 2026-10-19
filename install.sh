@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe/main/install.sh | bash -s -- music pdf
 #   curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe/main/install.sh | bash -s -- all
 #
-# Apps: settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store
+# Apps: settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store git
 # Options:
 #   --default  make the installed apps open their file types
 #   --gear     also add the Settings gear to the Omarchy bar (with settings)
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 REPO="design-nexus/nixe"
-ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store)
+ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store git)
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m==>\033[0m %s\n' "$*" >&2; }
@@ -27,6 +27,7 @@ app_info() {
     settings) ids="Settings" old_bins="settings settings-helper"; bins="nixe-settings nixe-settings-helper" ;;
     glimpse) ids="Glimpse" bins="nixe-glimpse nixe-glimpsed nixe-glimpse-settings" deps="bubblewrap" ;;
     contacts) ids="Contacts" defaults=true ;;
+    git) ids="Git" deps="gtksourceview5 libsecret git-lfs" ;;
     store) ids="Store" bins="nixe-store nixe-store-helper" deps="pacman appstream libarchive polkit base-devel libjxl" ;;
     tasks) ids="Tasks" old_bins="tasks" ;;
     torrents) ids="Torrents" old_bins="torrents" deps="libtorrent-rasterbar boost" defaults=true ;;
@@ -73,6 +74,20 @@ done
 mapfile -t apps < <(printf '%s\n' "${apps[@]}" | awk '!seen[$0]++')
 
 command -v hyprctl >/dev/null || warn "Hyprland wasn't found. Nixe apps are made for Omarchy (Hyprland), but run elsewhere too."
+
+# Keep a pacman-managed Git installation managed by pacman on subsequent updates.
+if [[ " ${apps[*]} " == *" git "* ]] && command -v pacman >/dev/null && pacman -Qq nixe-git >/dev/null 2>&1; then
+  package_helper=""
+  if [[ -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
+    package_helper="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/apps/git/packaging/build.sh"
+  fi
+  [[ -x $package_helper ]] || die "Git is managed by pacman. Update from a Nixe checkout with apps/git/packaging/build.sh --install."
+  "$package_helper" --install
+  remaining=()
+  for a in "${apps[@]}"; do [[ $a == git ]] || remaining+=("$a"); done
+  apps=("${remaining[@]}")
+  ((${#apps[@]})) || exit 0
+fi
 
 # ---------- Dependencies ----------
 if command -v pacman >/dev/null; then
