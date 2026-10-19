@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe/main/install.sh | bash -s -- music pdf
 #   curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe/main/install.sh | bash -s -- all
 #
-# Apps: settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store git
+# Apps: settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store git weather
 # Options:
 #   --default  make the installed apps open their file types
 #   --gear     also add the Settings gear to the Omarchy bar (with settings)
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 REPO="design-nexus/nixe"
-ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store git)
+ALL=(settings contacts tasks torrents pdf notepad music media-player chat fonts archive office photos glimpse store git weather)
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m==>\033[0m %s\n' "$*" >&2; }
@@ -38,6 +38,7 @@ app_info() {
     chat) ids="Chat" old_bins="chat" ;;
     fonts) ids="Fonts" old_bins="fonts" deps="fontconfig pango tar xz" ;;
     archive) ids="Archive" old_bins="archive" deps="7zip" defaults=true ;;
+    weather) ids="Weather" deps="sqlite" ;;
     office)
       bins="nixe-office nixe-write nixe-sheets nixe-present" ids="Write Sheets Present" defaults=true
       deps="gtksourceview5 libspelling hunspell hunspell-en_us"
