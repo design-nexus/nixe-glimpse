@@ -275,6 +275,81 @@ fn plugin_package_traversal_and_symlinks_rejected() {
     assert!(plugins::install_local(&p, &source, "local", "", false).is_err());
 }
 #[test]
+fn capture_host_args_map_tokens() {
+    assert_eq!(plugins::capture_host_args("nixe-capture", "region"), Some("--region"));
+    assert_eq!(plugins::capture_host_args("nixe-capture", "window"), Some("--window"));
+    assert_eq!(plugins::capture_host_args("nixe-capture", "fullscreen"), Some("--fullscreen"));
+    assert_eq!(plugins::capture_host_args("nixe-capture", "scroll"), Some("--scroll"));
+    assert_eq!(plugins::capture_host_args("nixe-capture", "other"), None);
+    assert_eq!(plugins::capture_host_args("nixe-news", "region"), None);
+}
+#[test]
+fn news_plugin_sees_only_its_library() {
+    let (t, p, _) = fixture();
+    let dir = t.path().join("news-plugin");
+    fs::create_dir(&dir).unwrap();
+    fs::write(
+        dir.join("plugin.toml"),
+        "id='nixe-news'\nname='News'\nversion='1'\napi_version=1\nexec=['python3','main.py']\ncapabilities=['search']\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("main.py"),
+        r#"import sys,json,os
+for line in sys.stdin:
+ r=json.loads(line)
+ if r['op']=='hello':print(json.dumps({'id':0,'api_version':1}),flush=True)
+ elif r['op']=='search':
+  assert not os.path.exists('/etc/passwd')
+  assert not os.path.exists('/home')
+  assert not os.path.isdir('/capture-library')
+  if os.path.isdir('/news-library'):
+   assert os.environ.get('NIXE_NEWS_DB')=='/news-library/news.sqlite'
+  else:
+   assert os.environ.get('NIXE_NEWS_DB') is None
+  print(json.dumps({'id':1,'result':[]}),flush=True)
+ elif r['op']=='shutdown':break
+"#,
+    )
+    .unwrap();
+    plugins::install_local(&p, &dir, "local", "", false).unwrap();
+    plugins::enable(&p, "nixe-news", true).unwrap();
+    plugins::call(&p, "nixe-news", "search", "search", json!({"query":"news"})).unwrap();
+}
+#[test]
+fn capture_plugin_sees_only_its_library() {
+    let (t, p, _) = fixture();
+    let dir = t.path().join("capture-plugin");
+    fs::create_dir(&dir).unwrap();
+    fs::write(
+        dir.join("plugin.toml"),
+        "id='nixe-capture'\nname='Capture'\nversion='1'\napi_version=1\nexec=['python3','main.py']\ncapabilities=['search']\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("main.py"),
+        r#"import sys,json,os
+for line in sys.stdin:
+ r=json.loads(line)
+ if r['op']=='hello':print(json.dumps({'id':0,'api_version':1}),flush=True)
+ elif r['op']=='search':
+  assert not os.path.exists('/etc/passwd')
+  assert not os.path.exists('/home')
+  assert not os.path.isdir('/news-library')
+  if os.path.isdir('/capture-library'):
+   assert os.environ.get('NIXE_CAPTURE_DB')=='/capture-library/capture.sqlite'
+  else:
+   assert os.environ.get('NIXE_CAPTURE_DB') is None
+  print(json.dumps({'id':1,'result':[]}),flush=True)
+ elif r['op']=='shutdown':break
+"#,
+    )
+    .unwrap();
+    plugins::install_local(&p, &dir, "local", "", false).unwrap();
+    plugins::enable(&p, "nixe-capture", true).unwrap();
+    plugins::call(&p, "nixe-capture", "search", "search", json!({"query":"capture"})).unwrap();
+}
+#[test]
 fn sandbox_blocks_home_and_network() {
     let (t, p, _) = fixture();
     let dir = t.path().join("sandbox");

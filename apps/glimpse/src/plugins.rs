@@ -338,6 +338,39 @@ pub fn sandbox_probe() -> Result<()> {
     process::capture(c, vec![], Duration::from_secs(3), 1024).context("OS sandbox unavailable; plugins remain disabled")?;
     Ok(())
 }
+fn xdg_data_home() -> PathBuf {
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+        .unwrap_or_else(|| PathBuf::from(".local/share"))
+}
+
+fn news_library_dir() -> PathBuf {
+    xdg_data_home().join("nixe-news")
+}
+
+fn capture_library_dir() -> PathBuf {
+    xdg_data_home().join("nixe-capture")
+}
+
+/// Read-only mount of the News library for the News plugin. Returns the database path inside the sandbox.
+fn bind_news_library(cmd: &mut Command, plugin_id: &str, dir: &Path) -> Option<&'static str> {
+    if plugin_id != "nixe-news" || !dir.is_dir() {
+        return None;
+    }
+    cmd.arg("--ro-bind").arg(dir).arg("/news-library");
+    Some("/news-library/news.sqlite")
+}
+
+/// Read-only mount of the Capture library for the Capture plugin. Returns the database path inside the sandbox.
+fn bind_capture_library(cmd: &mut Command, plugin_id: &str, dir: &Path) -> Option<&'static str> {
+    if plugin_id != "nixe-capture" || !dir.is_dir() {
+        return None;
+    }
+    cmd.arg("--ro-bind").arg(dir).arg("/capture-library");
+    Some("/capture-library/capture.sqlite")
+}
+
 fn sandbox(p: &Paths, plugin: &Plugin, read_one: Option<&Path>) -> Result<Command> {
     let cfg = p.load()?;
     if !plugin.grant.enabled
@@ -394,6 +427,10 @@ fn sandbox(p: &Paths, plugin: &Plugin, read_one: Option<&Path>) -> Result<Comman
         }
         cmd.arg("--ro-bind").arg(root).arg(root);
     }
+    // News and Capture keep libraries under ~/.local, which selected sources cannot name.
+    // Mount that one folder, not the rest of the hidden path.
+    let news_db = bind_news_library(&mut cmd, &plugin.manifest.id, &news_library_dir());
+    let capture_db = bind_capture_library(&mut cmd, &plugin.manifest.id, &capture_library_dir());
     cmd.args([
         "--chdir",
         "/plugin",
@@ -407,8 +444,14 @@ fn sandbox(p: &Paths, plugin: &Plugin, read_one: Option<&Path>) -> Result<Comman
         "--setenv",
         "GLIMPSE_STORAGE",
         "/storage",
-        "--",
     ]);
+    if let Some(db) = news_db {
+        cmd.args(["--setenv", "NIXE_NEWS_DB", db]);
+    }
+    if let Some(db) = capture_db {
+        cmd.args(["--setenv", "NIXE_CAPTURE_DB", db]);
+    }
+    cmd.arg("--");
     let executable = &plugin.manifest.exec[0];
     let exe = if executable.contains('/') {
         format!("/plugin/{}", executable.trim_start_matches("./"))
@@ -561,6 +604,36 @@ pub fn valid_action(p: &Paths, plugin: &Plugin, a: &Action) -> bool {
         Action::Activate { token } => token.len() <= 4096,
     }
 }
+/// Host-side Capture commands. The plugin cannot spawn GTK; Glimpse launches `nixe-capture` instead.
+pub fn capture_host_args(plugin_id: &str, token: &str) -> Option<&'static str> {
+    if plugin_id != "nixe-capture" {
+        return None;
+    }
+    match token {
+        "region" => Some("--region"),
+        "window" => Some("--window"),
+        "fullscreen" => Some("--fullscreen"),
+        "scroll" => Some("--scroll"),
+        _ => None,
+    }
+}
+
+pub fn spawn_capture(flag: &str) -> Result<()> {
+    let exe = capture_executable();
+    Command::new(&exe).arg(flag).spawn().with_context(|| format!("couldn't start {}", exe.display()))?;
+    Ok(())
+}
+
+fn capture_executable() -> PathBuf {
+    if let Some(home) = std::env::var_os("HOME") {
+        let local = PathBuf::from(home).join(".local/bin/nixe-capture");
+        if local.is_file() {
+            return local;
+        }
+    }
+    PathBuf::from("nixe-capture")
+}
+
 pub fn activate(p: &Paths, id: &str, token: &str) -> Result<Action> {
     let plugin = get(p, id)?;
     let cap = if plugin.manifest.capabilities.contains(&"commands".into()) { "commands" } else { "search" };

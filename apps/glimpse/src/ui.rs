@@ -1,10 +1,10 @@
-use crate::pw;
+use crate::player::Player;
 use gtk::{gdk, gio, glib, prelude::*};
+use crate::pw;
 use nixe_glimpse::{
     config::{self, Paths},
     index, passwords, plugins, query, semantic, utility,
 };
-use crate::player::Player;
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -176,11 +176,8 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     main.add_css_class("glimpse-frame");
     let search_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     search_bar.add_css_class("search-bar");
-    let entry = gtk::SearchEntry::builder()
-        .placeholder_text("Search apps, files and content")
-        .search_delay(0)
-        .hexpand(true)
-        .build();
+    let entry =
+        gtk::SearchEntry::builder().placeholder_text("Search apps, files and content").search_delay(0).hexpand(true).build();
     entry.add_css_class("glimpse-search");
     search_bar.append(&entry);
     main.append(&search_bar);
@@ -213,7 +210,9 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
             stop_playback(&media_hide, &playback_hide);
             let weak = w.downgrade();
             glib::idle_add_local_once(move || {
-                if let Some(w) = weak.upgrade() && !w.is_visible() && let Some(app) = w.application()
+                if let Some(w) = weak.upgrade()
+                    && !w.is_visible()
+                    && let Some(app) = w.application()
                     && !app.windows().iter().any(|other| other.is_visible())
                 {
                     // A dismissed launcher should release its native surface and D-Bus name.
@@ -248,13 +247,11 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     count.add_css_class("status-count");
     status_bar.append(&count);
     let app_clone = app.clone();
-    status_bar.append(&nixe_ui::chrome::status_action("folder-new-symbolic", "Add a folder to search", move || {
-        add_folder(&app_clone)
-    }));
+    status_bar
+        .append(&nixe_ui::chrome::status_action("folder-new-symbolic", "Add a folder to search", move || add_folder(&app_clone)));
     let app_clone = app.clone();
-    status_bar.append(&nixe_ui::chrome::status_action("application-x-addon-symbolic", "Plugins", move || {
-        plugin_manager(&app_clone)
-    }));
+    status_bar
+        .append(&nixe_ui::chrome::status_action("application-x-addon-symbolic", "Plugins", move || plugin_manager(&app_clone)));
     status_bar.append(&nixe_ui::chrome::gear(|| {
         dismiss();
         let _ = Command::new("nixe-settings").args(["--section", "glimpse"]).spawn();
@@ -498,11 +495,10 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                     event.kind,
                     notify::EventKind::Create(_) | notify::EventKind::Modify(_) | notify::EventKind::Remove(_)
                 )
-                && event.paths.iter().any(|path| {
-                    path.file_name().is_some_and(|name| {
-                        ["settings.toml", "plugins.json"].iter().any(|s| name == *s)
-                    })
-                })
+                && event
+                    .paths
+                    .iter()
+                    .any(|path| path.file_name().is_some_and(|name| ["settings.toml", "plugins.json"].iter().any(|s| name == *s)))
             {
                 signal.store(true, Ordering::Relaxed);
             }
@@ -596,9 +592,10 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
             count_poll.set_text(&count_text(merged.len()));
             let unchanged = {
                 let old = rows_poll.borrow();
-                old.len() == merged.len() && old.iter().zip(&merged).all(|(a, b)| {
-                    a.identity() == b.identity() && a.title == b.title && a.folder == b.folder && a.reason == b.reason
-                })
+                old.len() == merged.len()
+                    && old.iter().zip(&merged).all(|(a, b)| {
+                        a.identity() == b.identity() && a.title == b.title && a.folder == b.folder && a.reason == b.reason
+                    })
             };
             if unchanged {
                 *rows_poll.borrow_mut() = merged;
@@ -700,7 +697,9 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     let window_select = window.clone();
     let entry_select = entry.clone();
     list.connect_row_selected(move |_, row| {
-        if rebuilding.get() { return; }
+        if rebuilding.get() {
+            return;
+        }
         // Moving away from a system action disarms it.
         if armed_preview.borrow_mut().take().is_some() {
             footer_preview.set_text("");
@@ -728,7 +727,9 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
             return;
         };
         let identity = result.identity();
-        if selected_preview.borrow().as_ref() == Some(&identity) { return; }
+        if selected_preview.borrow().as_ref() == Some(&identity) {
+            return;
+        }
         *selected_preview.borrow_mut() = Some(identity);
         set_hints(&hints_preview, Some(&result.action));
         let g = gen_preview.fetch_add(1, Ordering::Relaxed) + 1;
@@ -743,7 +744,12 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                 pane.add_detail("Kind", "Application");
                 if let Some(command) = app.and_then(|a| a.commandline()) {
                     // Drop the desktop-entry field codes (%U, %f, …) from the command shown.
-                    let command = command.to_string_lossy().split_whitespace().filter(|w| !w.starts_with('%')).collect::<Vec<_>>().join(" ");
+                    let command = command
+                        .to_string_lossy()
+                        .split_whitespace()
+                        .filter(|w| !w.starts_with('%'))
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     pane.add_detail("Command", &command);
                 }
                 return;
@@ -768,7 +774,9 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                 // Until the preview arrives, a dim icon holds the frame so it doesn't flash.
                 pane.card(&icon, "", "", true);
                 let c = Paths::discover().load().unwrap_or_default();
-                if c.preview && config::allowed(&c, path) && let Some(is_video) = media_kind(path)
+                if c.preview
+                    && config::allowed(&c, path)
+                    && let Some(is_video) = media_kind(path)
                     && let Some(player) = Player::new(path, is_video)
                 {
                     if !is_video {
@@ -1112,9 +1120,7 @@ thread_local! {static APPS: RefCell<std::collections::HashMap<String, gio::AppIn
 fn action_icon(action: &Action) -> gio::Icon {
     let icon = match action {
         Action::App(id) => APPS.with(|apps| apps.borrow().get(id).and_then(|app| app.icon())),
-        Action::File(path, _) => {
-            Some(gio::content_type_get_symbolic_icon(&content_type(path)))
-        }
+        Action::File(path, _) => Some(gio::content_type_get_symbolic_icon(&content_type(path))),
         _ => None,
     };
     icon.unwrap_or_else(|| gio::ThemedIcon::new(symbolic_icon(action)).upcast())
@@ -1330,7 +1336,8 @@ fn make_preview(result: &ResultRow, query: &str) -> Preview {
             let text = plugin
                 .filter(|plugin| plugin.manifest.capabilities.contains(&"preview".into()))
                 .and_then(|_| {
-                    plugins::call(&p, id, "preview", "preview", json!({"result_id":result_id,"title":result.title,"query":query})).ok()
+                    plugins::call(&p, id, "preview", "preview", json!({"result_id":result_id,"title":result.title,"query":query}))
+                        .ok()
                 })
                 .and_then(|v| v["text"].as_str().map(|s| s.chars().take(16000).collect::<String>()));
             Preview { body: text.map_or(Body::Icon, |t| Body::Text(highlight(&t, query))), details }
@@ -1395,7 +1402,15 @@ fn file_body(path: &Path, hit: &Value, query: &str, details: &mut Vec<(String, S
             for seek in ["5", "0"] {
                 let mut cmd = Command::new("ffmpeg");
                 cmd.args(["-v", "error", "-threads", "1", "-ss", seek, "-i"]).arg(path).args([
-                    "-frames:v", "1", "-vf", "scale=800:800:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "-",
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=800:800:force_original_aspect_ratio=decrease",
+                    "-f",
+                    "image2pipe",
+                    "-vcodec",
+                    "png",
+                    "-",
                 ]);
                 if let Some(bytes) = capture_image(cmd) {
                     return Body::Image(bytes);
@@ -1429,7 +1444,15 @@ fn file_body(path: &Path, hit: &Value, query: &str, details: &mut Vec<(String, S
         }
         let mut cmd = Command::new("ffmpeg");
         cmd.args(["-v", "error", "-threads", "1", "-i"]).arg(path).args([
-            "-frames:v", "1", "-vf", "scale=800:800:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "-",
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=800:800:force_original_aspect_ratio=decrease",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "png",
+            "-",
         ]);
         return capture_image(cmd).map_or(Body::Icon, Body::Image);
     }
@@ -1496,6 +1519,13 @@ fn activate(
     reveal: bool,
 ) {
     if let Action::Plugin(id, result_id, plugins::Action::Activate { token }) = &result.action {
+        if let Some(flag) = plugins::capture_host_args(id, token) {
+            match plugins::spawn_capture(flag) {
+                Ok(()) => window.set_visible(false),
+                Err(e) => status_error(status, e),
+            }
+            return;
+        }
         let (id, result_id, token) = (id.clone(), result_id.clone(), token.clone());
         let (tx, rx) = mpsc::channel();
         let worker_id = id.clone();
@@ -1561,8 +1591,15 @@ fn activate(
                 if !plugin.grant.enabled || !plugins::valid_action(&p, &plugin, &action) {
                     anyhow::bail!("plugin permission revoked");
                 }
-                let action =
-                    if let plugins::Action::Activate { token } = action { plugins::activate(&p, &id, &token)? } else { action };
+                let action = if let plugins::Action::Activate { token } = action {
+                    if let Some(flag) = plugins::capture_host_args(&id, &token) {
+                        plugins::spawn_capture(flag)?;
+                        return Ok(());
+                    }
+                    plugins::activate(&p, &id, &token)?
+                } else {
+                    action
+                };
                 match action {
                     plugins::Action::Copy { text } => window.clipboard().set_text(&text),
                     plugins::Action::Open { path } => open_file(&path, &Value::Null, reveal)?,
@@ -2203,7 +2240,9 @@ fn media_kind(path: &Path) -> Option<bool> {
         is_stream.then_some(true)
     } else if ["mp3", "wav", "flac", "ogg", "opus", "m4a", "aac", "aiff", "wma"].contains(&ext.as_str()) {
         Some(false)
-    } else { None }
+    } else {
+        None
+    }
 }
 /// Syntax colours drawn from the Nixe palette rather than a fixed editor theme, so code
 /// previews match every theme: the accent for structure, dim italics for comments.
@@ -2235,9 +2274,17 @@ fn code_markup(code: &str, path: &Path) -> Option<String> {
         settings: ThemeSettings { foreground: color(&palette.text), ..Default::default() },
         scopes: vec![
             item("comment, punctuation.definition.comment, markup.quote", dim, FontStyle::ITALIC),
-            item("keyword, storage, constant.numeric, constant.language, entity.name.type, support.type", accent, FontStyle::empty()),
+            item(
+                "keyword, storage, constant.numeric, constant.language, entity.name.type, support.type",
+                accent,
+                FontStyle::empty(),
+            ),
             item("markup.heading, entity.name.section, punctuation.definition.heading", accent, FontStyle::BOLD),
-            item("markup.raw, markup.inline.raw, markup.underline.link, punctuation.definition.list_item", accent, FontStyle::empty()),
+            item(
+                "markup.raw, markup.inline.raw, markup.underline.link, punctuation.definition.list_item",
+                accent,
+                FontStyle::empty(),
+            ),
             item("entity.name.function, markup.bold", &palette.text, FontStyle::BOLD),
             item("markup.italic", &palette.text, FontStyle::ITALIC),
         ],
@@ -2262,7 +2309,11 @@ fn code_markup(code: &str, path: &Path) -> Option<String> {
     Some(markup)
 }
 pub fn dismiss() {
-    PANEL.with(|p| { if let Some(window) = p.borrow().as_ref() { window.set_visible(false); } });
+    PANEL.with(|p| {
+        if let Some(window) = p.borrow().as_ref() {
+            window.set_visible(false);
+        }
+    });
 }
 
 /// Select a result by index and scroll just enough to show it.
@@ -2283,7 +2334,9 @@ fn select_and_reveal(list: &gtk::ListBox, scroll: &gtk::ScrolledWindow, browsing
 }
 fn navigate_result(list: &gtk::ListBox, direction: i32) {
     let next = list.selected_row().map(|row| (row.index() + direction).max(0)).unwrap_or(0);
-    if let Some(row) = list.row_at_index(next) { list.select_row(Some(&row)); }
+    if let Some(row) = list.row_at_index(next) {
+        list.select_row(Some(&row));
+    }
 }
 #[cfg(test)]
 mod tests {
