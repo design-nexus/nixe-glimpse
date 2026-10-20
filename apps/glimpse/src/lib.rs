@@ -2,6 +2,7 @@ pub mod cli;
 pub mod config;
 pub mod index;
 pub mod integration;
+pub mod passwords;
 pub mod plugins;
 pub mod process;
 pub mod sdk;

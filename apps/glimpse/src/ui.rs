@@ -1,7 +1,8 @@
+use crate::pw;
 use gtk::{gdk, gio, glib, prelude::*};
 use nixe_glimpse::{
     config::{self, Paths},
-    index, plugins, query, semantic, utility,
+    index, passwords, plugins, query, semantic, utility,
 };
 use crate::player::Player;
 use serde_json::{Value, json};
@@ -31,6 +32,8 @@ enum Action {
     Copy(String),
     System(&'static str),
     Plugin(String, String, plugins::Action),
+    /// A Nixe Passwords row (`pw …`): an item's id and metadata, never a secret.
+    Password(pw::Pw),
 }
 #[derive(Clone)]
 struct ResultRow {
@@ -50,6 +53,7 @@ impl ResultRow {
             Action::Copy(_) => (2, "Utilities"),
             Action::System(_) => (3, "System"),
             Action::Plugin(_, _, _) => (4, "Plugins"),
+            Action::Password(_) => (0, "Passwords"),
         }
     }
     fn identity(&self) -> String {
@@ -59,6 +63,7 @@ impl ResultRow {
             Action::Copy(value) => format!("copy:{value}"),
             Action::System(cmd) => format!("system:{cmd}"),
             Action::Plugin(id, hit, _) => format!("plugin:{id}:{hit}"),
+            Action::Password(p) => p.key(),
         }
     }
 }
@@ -373,6 +378,8 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
             let _ = tx_enrich.send(Reply { generation: request_generation, rows: enrich, append: true, status: semantic_status });
         }
     });
+    // `pw` queries are answered on this thread (the daemon's client runs on the GTK loop).
+    let tx_pw = tx.clone();
     let gen_worker = generation.clone();
     std::thread::spawn(move || {
         // One index connection for the life of the window, not one per keystroke.
@@ -529,8 +536,11 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         }
         if invalidated.swap(false, Ordering::Relaxed) {
             pane_poll.set_visible(Paths::discover().load().is_ok_and(|c| c.preview));
-            let g = gen_poll.fetch_add(1, Ordering::Relaxed) + 1;
-            let _ = refresh_jobs.send((g, refresh_entry.text().to_string()));
+            // A `pw` query never goes to the other providers.
+            if passwords::parse(&refresh_entry.text()).is_none() {
+                let g = gen_poll.fetch_add(1, Ordering::Relaxed) + 1;
+                let _ = refresh_jobs.send((g, refresh_entry.text().to_string()));
+            }
         }
         while let Ok(reply) = rx.try_recv() {
             if reply.generation != gen_poll.load(Ordering::Relaxed) {
@@ -630,7 +640,7 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     entry.connect_search_changed(move |e| {
         browsing_entry.set(false);
         let expanded = !e.text().trim().is_empty();
-        let is_math = utility::intent(&e.text()) == utility::Intent::Calculation;
+        let is_math = utility::intent(&e.text()) == utility::Intent::Calculation && passwords::parse(&e.text()).is_none();
         pane_entry.show_calculator(is_math);
         stop_playback(&pane_entry.media, &playback_entry);
         if is_math {
@@ -661,6 +671,19 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         count_entry.set_text("");
         set_hints(&hints_entry, None);
         let g = gen_entry.fetch_add(1, Ordering::Relaxed) + 1;
+        // `pw …` belongs to the vault alone: no apps, files, plugins or semantic search.
+        if let Some(q) = passwords::parse(&e.text()) {
+            let tx = tx_pw.clone();
+            glib::spawn_future_local(async move {
+                let (found, status) = pw::lookup(&q).await;
+                let rows = found
+                    .into_iter()
+                    .map(|(title, folder, p)| ResultRow { title, folder, reason: String::new(), action: Action::Password(p) })
+                    .collect();
+                let _ = tx.send(Reply { generation: g, rows, append: false, status });
+            });
+            return;
+        }
         let _ = jobs_entry.send((g, e.text().to_string()));
     });
     let preview_gen = Arc::new(AtomicU64::new(0));
@@ -734,6 +757,13 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                 pane.card(&icon, "", system_description(cmd), false);
                 return;
             }
+            Action::Password(p) => {
+                pane.card(&icon, &result.title, &result.folder, false);
+                for (key, value) in p.details() {
+                    pane.add_detail(&key, &value);
+                }
+                return;
+            }
             Action::File(path, _) => {
                 // Until the preview arrives, a dim icon holds the frame so it doesn't flash.
                 pane.card(&icon, "", "", true);
@@ -793,6 +823,10 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     let armed_activate = armed.clone();
     list.connect_row_activated(move |_, row| {
         if let Some(result) = rows_activate.borrow().get(row.index() as usize) {
+            if let Action::Password(p) = &result.action {
+                pw::activate(p, None, &win_activate, &footer_activate);
+                return;
+            }
             activate(result, &win_activate, &footer_activate, &armed_activate, false);
         }
     });
@@ -839,7 +873,26 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                 if let Some(row) = list_keys.selected_row()
                     && let Some(result) = rows_keys.borrow().get(row.index() as usize)
                 {
+                    if let Action::Password(p) = &result.action {
+                        // Ctrl+Enter copies the password, Alt+Enter the one-time code.
+                        let verb = if mods.contains(gdk::ModifierType::CONTROL_MASK) {
+                            Some(passwords::Verb::Password)
+                        } else if mods.contains(gdk::ModifierType::ALT_MASK) {
+                            Some(passwords::Verb::Totp)
+                        } else {
+                            None
+                        };
+                        pw::activate(p, verb, &win_keys, &footer_keys);
+                        return glib::Propagation::Stop;
+                    }
                     activate(result, &win_keys, &footer_keys, &armed, mods.contains(gdk::ModifierType::CONTROL_MASK));
+                }
+            }
+            gdk::Key::o | gdk::Key::O if mods.contains(gdk::ModifierType::CONTROL_MASK) => {
+                let selected = list_keys.selected_row().and_then(|row| rows_keys.borrow().get(row.index() as usize).cloned());
+                match selected.map(|r| r.action) {
+                    Some(Action::Password(p)) => pw::activate(&p, Some(passwords::Verb::Open), &win_keys, &footer_keys),
+                    _ => return glib::Propagation::Proceed,
                 }
             }
             // With text selected in the search box Ctrl+C copies that; otherwise the selected result.
@@ -848,6 +901,11 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
                 let Some(result) = rows_keys.borrow().get(row.index() as usize).cloned() else {
                     return glib::Propagation::Proceed;
                 };
+                // A vault row copies its username through the daemon, never its title.
+                if let Action::Password(p) = &result.action {
+                    pw::activate(p, Some(passwords::Verb::Username), &win_keys, &footer_keys);
+                    return glib::Propagation::Stop;
+                }
                 let text = match &result.action {
                     Action::File(path, _) => path.display().to_string(),
                     Action::Copy(value) => value.clone(),
@@ -1107,6 +1165,7 @@ fn set_hints(hints: &gtk::Box, action: Option<&Action>) {
         Some(Action::System("lock")) => vec![(enter, "Lock")],
         Some(Action::System(_)) => vec![(enter, "Run")],
         Some(Action::Plugin(..)) => vec![(enter, "Open")],
+        Some(Action::Password(p)) => p.hints(),
         None => vec![],
     };
     for (keys, label) in list {
@@ -1126,6 +1185,7 @@ fn symbolic_icon(action: &Action) -> &'static str {
         Action::System("reboot") => "system-reboot-symbolic",
         Action::System(_) => "system-shutdown-symbolic",
         Action::Plugin(..) => "application-x-addon-symbolic",
+        Action::Password(p) => p.icon(),
     }
 }
 /// Apps show their own icon; files the symbolic icon for their type.
@@ -1510,6 +1570,8 @@ fn activate(
                     plugins::Action::Activate { .. } => unreachable!(),
                 }
             }
+            // Routed to `pw::activate` before this; nothing to do here.
+            Action::Password(_) => {}
         }
         Ok(())
     })();

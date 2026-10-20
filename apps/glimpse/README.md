@@ -46,6 +46,24 @@ Tesseract OCR is optional. Missing readers are recorded as indexing errors and d
 not stop filename search. Audio retrieval finds moments; it does not transcribe.
 Long PDFs/documents/media continue across bounded indexing passes.
 
+## Passwords
+
+With [Passwords](../passwords) installed, a query starting with `pw` (or `password`)
+searches your vault and nothing else: no apps, files, plugins or local AI see it.
+
+| Query | Shows |
+| --- | --- |
+| `pw` | Items you copied from recently |
+| `pw github` | Matching items, by name, username or site |
+| `pw github pass` / `otp` / `open` | The same, with Enter copying the password, the one-time code, or opening the site |
+| `pw generate` | A new password, copied |
+| `pw lock` | Locks the vault |
+
+Enter copies the username; Ctrl+Enter the password; Alt+Enter the one-time code;
+Ctrl+O opens the site. Passwords are never shown in Glimpse, and the copy is cleared
+from the clipboard after Passwords' set time. A locked vault offers to unlock in
+Passwords. Turn this off in Passwords' settings.
+
 ## Plugins
 
 Open Plugins from the panel or Settings. Browse includes the bundled Quick Tools

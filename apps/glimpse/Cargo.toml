@@ -12,6 +12,7 @@ glimpse-plugin-sdk = { path = "../../crates/glimpse-plugin-sdk" }
 nixe-core = { path = "../../crates/nixe-core" }
 nixe-ui = { path = "../../crates/nixe-ui" }
 nixe-theme = { path = "../../crates/nixe-theme" }
+nixe-passwords-proto = { path = "../../crates/nixe-passwords-proto", features = ["client"] }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_18"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

@@ -1,4 +1,5 @@
 mod player;
+mod pw;
 mod ui;
 use gtk::{gio, glib, prelude::*};
 fn main() -> glib::ExitCode {
