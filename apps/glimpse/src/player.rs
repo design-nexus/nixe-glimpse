@@ -208,7 +208,11 @@ impl State {
                         (PAUSE, FORMAT_FLAG) => {
                             let paused = unsafe { *(property.data as *const c_int) } != 0;
                             self.paused.set(paused);
-                            self.play.set_icon_name(if paused { "media-playback-start-symbolic" } else { "media-playback-pause-symbolic" });
+                            self.play.set_icon_name(if paused {
+                                "media-playback-start-symbolic"
+                            } else {
+                                "media-playback-pause-symbolic"
+                            });
                         }
                         (EOF, FORMAT_FLAG) => self.eof.set(unsafe { *(property.data as *const c_int) } != 0),
                         _ => {}
@@ -333,7 +337,12 @@ impl Player {
             0.,
             100.,
             5.,
-            &["audio-volume-muted-symbolic", "audio-volume-high-symbolic", "audio-volume-low-symbolic", "audio-volume-medium-symbolic"],
+            &[
+                "audio-volume-muted-symbolic",
+                "audio-volume-high-symbolic",
+                "audio-volume-low-symbolic",
+                "audio-volume-medium-symbolic",
+            ],
         );
         volume.set_value(100.);
         volume.set_focusable(false);

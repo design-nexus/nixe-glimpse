@@ -386,8 +386,12 @@ impl Session {
             [(top, _)] => *top > 0.,
             [] => false,
         };
-        let mut semantic: Vec<_> =
-            ranked.into_iter().enumerate().filter(|(i, (lift, _))| *lift >= 0.09 || (*i == 0 && standout)).map(|(_, hit)| hit).collect();
+        let mut semantic: Vec<_> = ranked
+            .into_iter()
+            .enumerate()
+            .filter(|(i, (lift, _))| *lift >= 0.09 || (*i == 0 && standout))
+            .map(|(_, hit)| hit)
+            .collect();
         if let Some((top, _)) = semantic.first() {
             let minimum = *top - 0.05;
             semantic.retain(|(lift, _)| *lift >= minimum);
@@ -882,11 +886,7 @@ pub fn index_scanned(p: &Paths) -> Result<bool> {
             current = p.load()?;
             loaded = std::time::Instant::now();
         }
-        if current.paused
-            || !current.semantic
-            || current.roots != cfg.roots
-            || current.excluded != cfg.excluded
-        {
+        if current.paused || !current.semantic || current.roots != cfg.roots || current.excluded != cfg.excluded {
             break;
         }
         if started.elapsed() > Duration::from_secs(300) {
@@ -990,6 +990,9 @@ pub fn index_scanned(p: &Paths) -> Result<bool> {
 mod tests {
     #[test]
     fn entities_decode_once() {
-        assert_eq!(super::strip_markup("<w:t>a &amp;lt; b &quot;c&apos; &#233;&#x41; &bogus; & x</w:t>"), " a &lt; b \"c' éA &bogus; & x ");
+        assert_eq!(
+            super::strip_markup("<w:t>a &amp;lt; b &quot;c&apos; &#233;&#x41; &bogus; & x</w:t>"),
+            " a &lt; b \"c' éA &bogus; & x "
+        );
     }
 }
