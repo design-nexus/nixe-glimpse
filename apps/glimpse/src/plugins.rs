@@ -666,7 +666,7 @@ pub fn catalog(p: &Paths, refresh: bool) -> Result<Vec<CatalogEntry>> {
                 "-fLsS",
                 "--max-time",
                 "10",
-                "https://raw.githubusercontent.com/design-nexus/nixe/main/apps/glimpse/data/plugins.json",
+                "https://raw.githubusercontent.com/design-nexus/nixe-glimpse/main/apps/glimpse/data/plugins.json",
             ]);
             let out = process::capture(c, vec![], Duration::from_secs(12), 1024 * 1024)?;
             let _: Vec<CatalogEntry> = serde_json::from_slice(&out).context("invalid online catalog")?;
