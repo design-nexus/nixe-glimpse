@@ -6,5 +6,16 @@
   ],
   "manifest": "Cargo.toml",
   "prepare": [],
-  "binaries": []
+  "binaries": [],
+  "test_commands": [
+    [
+      "cargo",
+      "test",
+      "--locked",
+      "-p",
+      "nixe-glimpse",
+      "--bin",
+      "nixe-glimpse"
+    ]
+  ]
 }
