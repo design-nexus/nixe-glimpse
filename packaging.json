@@ -1,0 +1,10 @@
+{
+  "application": "glimpse",
+  "directory": "glimpse",
+  "packages": [
+    "nixe-glimpse"
+  ],
+  "manifest": "Cargo.toml",
+  "prepare": [],
+  "binaries": []
+}
