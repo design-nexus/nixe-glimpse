@@ -759,7 +759,7 @@ dependencies = [
 [[package]]
 name = "nixe-core"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-core.git?rev=e4595e68a4fd9b44bd15e95311ace1d0fb669bc4#e4595e68a4fd9b44bd15e95311ace1d0fb669bc4"
+source = "git+https://github.com/design-nexus/nixe-core.git?rev=7cd0be5d09cd1d91510794f58bbc720605951c12#7cd0be5d09cd1d91510794f58bbc720605951c12"
 dependencies = [
  "anyhow",
  "gtk4",
@@ -793,7 +793,7 @@ dependencies = [
 [[package]]
 name = "nixe-passwords-proto"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-passwords.git?rev=d7e69dd5be0aa2b2cd186a108d2435ab10411f26#d7e69dd5be0aa2b2cd186a108d2435ab10411f26"
+source = "git+https://github.com/design-nexus/nixe-passwords.git?rev=284b0a01d767b510308602b53d6cb3887d38bb68#284b0a01d767b510308602b53d6cb3887d38bb68"
 dependencies = [
  "gio",
 ]
@@ -801,7 +801,7 @@ dependencies = [
 [[package]]
 name = "nixe-theme"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-design.git?rev=0319940fb27bb5fc7f04742bcb2bd331b384c425#0319940fb27bb5fc7f04742bcb2bd331b384c425"
+source = "git+https://github.com/design-nexus/nixe-design.git?rev=609c1d2a5af41a8ee3b76ba23611eb30d95a4743#609c1d2a5af41a8ee3b76ba23611eb30d95a4743"
 dependencies = [
  "gtk4",
  "nixe-core",
@@ -812,7 +812,7 @@ dependencies = [
 [[package]]
 name = "nixe-ui"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-design.git?rev=0319940fb27bb5fc7f04742bcb2bd331b384c425#0319940fb27bb5fc7f04742bcb2bd331b384c425"
+source = "git+https://github.com/design-nexus/nixe-design.git?rev=609c1d2a5af41a8ee3b76ba23611eb30d95a4743#609c1d2a5af41a8ee3b76ba23611eb30d95a4743"
 dependencies = [
  "gtk4",
  "nixe-core",
