@@ -9,10 +9,10 @@ repository.workspace = true
 
 [dependencies]
 glimpse-plugin-sdk = { path = "../../crates/glimpse-plugin-sdk" }
-nixe-core = { git = "file:///home/ken/Projects/nixe-migration-97c1899-reviewed/nixe-core", rev = "e4595e68a4fd9b44bd15e95311ace1d0fb669bc4" }
-nixe-ui = { git = "file:///home/ken/Projects/nixe-migration-97c1899-reviewed/nixe-design", rev = "6997fb93fe248e20a19277dbd3ef219cdba18683" }
-nixe-theme = { git = "file:///home/ken/Projects/nixe-migration-97c1899-reviewed/nixe-design", rev = "6997fb93fe248e20a19277dbd3ef219cdba18683" }
-nixe-passwords-proto = { git = "file:///home/ken/Projects/nixe-migration-97c1899-apps-complete/nixe-passwords", rev = "0d13dd06ced230e2e477a01e9f52d9f33e81a16e", features = ["client"] }
+nixe-core = { git = "https://github.com/design-nexus/nixe-core.git", rev = "e4595e68a4fd9b44bd15e95311ace1d0fb669bc4" }
+nixe-ui = { git = "https://github.com/design-nexus/nixe-design.git", rev = "0319940fb27bb5fc7f04742bcb2bd331b384c425" }
+nixe-theme = { git = "https://github.com/design-nexus/nixe-design.git", rev = "0319940fb27bb5fc7f04742bcb2bd331b384c425" }
+nixe-passwords-proto = { git = "https://github.com/design-nexus/nixe-passwords.git", rev = "d7e69dd5be0aa2b2cd186a108d2435ab10411f26", features = ["client"] }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_18"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
