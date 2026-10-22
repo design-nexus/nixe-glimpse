@@ -431,6 +431,8 @@ fn sandbox(p: &Paths, plugin: &Plugin, read_one: Option<&Path>) -> Result<Comman
     // Mount that one folder, not the rest of the hidden path.
     let news_db = bind_news_library(&mut cmd, &plugin.manifest.id, &news_library_dir());
     let capture_db = bind_capture_library(&mut cmd, &plugin.manifest.id, &capture_library_dir());
+    // Mail, Calendar and Reminders: one database file each, nothing else of theirs.
+    let pim_db = crate::pim::bind(&mut cmd, &plugin.manifest.id, &xdg_data_home());
     cmd.args([
         "--chdir",
         "/plugin",
@@ -447,6 +449,9 @@ fn sandbox(p: &Paths, plugin: &Plugin, read_one: Option<&Path>) -> Result<Comman
     ]);
     if let Some(db) = news_db {
         cmd.args(["--setenv", "NIXE_NEWS_DB", db]);
+    }
+    if let Some((key, db)) = pim_db {
+        cmd.args(["--setenv", key, db]);
     }
     if let Some(db) = capture_db {
         cmd.args(["--setenv", "NIXE_CAPTURE_DB", db]);

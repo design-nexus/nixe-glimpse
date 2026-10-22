@@ -1526,6 +1526,13 @@ fn activate(
             }
             return;
         }
+        if let Some(done) = nixe_glimpse::pim::host_action(&Paths::discover(), id, token) {
+            match done {
+                Ok(()) => window.set_visible(false),
+                Err(e) => status_error(status, e),
+            }
+            return;
+        }
         let (id, result_id, token) = (id.clone(), result_id.clone(), token.clone());
         let (tx, rx) = mpsc::channel();
         let worker_id = id.clone();
