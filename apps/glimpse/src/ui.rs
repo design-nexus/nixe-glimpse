@@ -1519,6 +1519,7 @@ fn activate(
     reveal: bool,
 ) {
     if let Action::Plugin(id, result_id, plugins::Action::Activate { token }) = &result.action {
+        if let Some(result)=plugins::notes_host_action(&Paths::discover(),id,token){match result{Ok(())=>window.set_visible(false),Err(e)=>status_error(status,e)}return;}
         if let Some(flag) = plugins::capture_host_args(id, token) {
             match plugins::spawn_capture(flag) {
                 Ok(()) => window.set_visible(false),

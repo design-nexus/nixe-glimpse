@@ -430,6 +430,8 @@ fn sandbox(p: &Paths, plugin: &Plugin, read_one: Option<&Path>) -> Result<Comman
     // News and Capture keep libraries under ~/.local, which selected sources cannot name.
     // Mount that one folder, not the rest of the hidden path.
     let news_db = bind_news_library(&mut cmd, &plugin.manifest.id, &news_library_dir());
+    let notes_dir=xdg_data_home().join("nixe-notes/glimpse");
+    let notes_db=if plugin.manifest.id=="nixe-notes"&&notes_dir.is_dir(){cmd.arg("--ro-bind").arg(&notes_dir).arg("/notes-library");Some("/notes-library/launcher.sqlite")}else{None};
     let capture_db = bind_capture_library(&mut cmd, &plugin.manifest.id, &capture_library_dir());
     // Mail, Calendar and Reminders: one database file each, nothing else of theirs.
     let pim_db = crate::pim::bind(&mut cmd, &plugin.manifest.id, &xdg_data_home());
@@ -456,6 +458,7 @@ fn sandbox(p: &Paths, plugin: &Plugin, read_one: Option<&Path>) -> Result<Comman
     if let Some(db) = capture_db {
         cmd.args(["--setenv", "NIXE_CAPTURE_DB", db]);
     }
+    if let Some(db)=notes_db{cmd.args(["--setenv","NIXE_NOTES_INDEX",db]);}
     cmd.arg("--");
     let executable = &plugin.manifest.exec[0];
     let exe = if executable.contains('/') {
@@ -749,3 +752,19 @@ pub fn link_local(p: &Paths, source: &Path) -> Result<String> {
     }
     Ok(manifest.id)
 }
+
+// Notes host-action profile v1. Keep the plugin sandbox read-only: the host launches
+// only the installed Notes executable with one validated JSON argument, never a shell.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NotesHostRequest {api_version:u32,op:String,vault:PathBuf,#[serde(default)]path:Option<PathBuf>,#[serde(default)]title:Option<String>,#[serde(default)]offset:Option<u64>,#[serde(default)]append:bool}
+fn notes_host_args(token:&str)->Result<Vec<String>>{
+    if token.len()>4096{bail!("Notes action exceeds limit");}let request:NotesHostRequest=serde_json::from_str(token)?;
+    if request.api_version!=1||!request.vault.is_absolute()||request.vault.components().any(|c|c==std::path::Component::ParentDir){bail!("Invalid Notes vault");}
+    match request.op.as_str(){"create"=>{let title=request.title.context("Missing note title")?;if title.is_empty()||title.len()>240||title.starts_with('.')||title.contains(['/','\\','\0','\n','\r']){bail!("Invalid note title");}},"open"=>{let path=request.path.context("Missing note path")?;if !path.starts_with(&request.vault)||path.components().any(|c|c==std::path::Component::ParentDir||c.as_os_str()==".obsidian"){bail!("Note must remain inside its vault");}},_=>bail!("Unsupported Notes operation")};
+    let _=(request.offset,request.append);Ok(vec!["--launcher-action".into(),token.into()])
+}
+pub fn notes_host_action(paths:&Paths,id:&str,token:&str)->Option<Result<()>>{
+    if id!="nixe-notes"{return None;}Some((||{let plugin=get(paths,id)?;if !plugin.grant.enabled||plugin.grant.version!=plugin.manifest.version||plugin.grant.requested!=plugin.manifest.permissions{bail!("Notes plugin permission was revoked or changed");}let args=notes_host_args(token)?;let local=std::env::var_os("HOME").map(PathBuf::from).map(|h|h.join(".local/bin/nixe-notes"));let exe=local.filter(|p|p.is_file()).unwrap_or_else(||PathBuf::from("nixe-notes"));Command::new(&exe).args(args).spawn().with_context(||format!("Could not start {}",exe.display()))?;Ok(())})())
+}
+#[cfg(test)]mod notes_action_tests{use super::*;#[test]fn notes_actions_never_execute_arbitrary_commands(){assert!(notes_host_args(r#"{"api_version":1,"op":"create","vault":"/home/test/Notes","title":"Research; echo nope"}"#).is_ok());assert!(notes_host_args(r#"{"api_version":1,"op":"exec","vault":"/home/test/Notes","title":"shell"}"#).is_err());assert!(notes_host_args(r#"{"api_version":1,"op":"open","vault":"/home/test/Notes","path":"/home/test/Notes/../secret.md"}"#).is_err());assert!(notes_host_args(r#"{"api_version":1,"op":"create","vault":"/home/test/Notes","title":"../escape"}"#).is_err());}}
