@@ -4,6 +4,12 @@ Nixe’s local universal search panel. Apps, filenames, arithmetic, conversions,
 semantic document/media search, and plugins share one keyboard-driven interface.
 Glimpse follows the suite theme. Sources start empty and models download only when requested.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe-glimpse/main/install.sh | bash
+```
+
 ## Build and run
 
 ```sh
@@ -12,7 +18,7 @@ cargo build -p nixe-glimpse
 ./target/debug/nixe-glimpse --plugins
 ```
 
-Install through the suite with `./install.sh glimpse`. This registers the desktop
+Installing (see Install above) registers the desktop
 entry and one Glimpse page under Desktop in Settings. It installs a reversible floating-window
 rule; shortcut replacement is a separate, explicit Settings action. Default bindings
 are Super+Space for Glimpse and Ctrl+Space for the Omarchy menu, replacing the existing
