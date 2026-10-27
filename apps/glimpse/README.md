@@ -1,15 +1,15 @@
 # Glimpse
 
-Nixe’s local universal search panel. Apps, filenames, arithmetic, conversions,
+Nyx’s local universal search panel. Apps, filenames, arithmetic, conversions,
 semantic document/media search, and plugins share one keyboard-driven interface.
 Glimpse follows the suite theme. Sources start empty and models download only when requested.
 
 ## Build and run
 
 ```sh
-cargo build -p nixe-glimpse
-./target/debug/nixe-glimpse
-./target/debug/nixe-glimpse --plugins
+cargo build -p nyx-glimpse
+./target/debug/nyx-glimpse
+./target/debug/nyx-glimpse --plugins
 ```
 
 Install through the suite with `./install.sh glimpse`. This registers the desktop
@@ -32,8 +32,8 @@ Glimpse code. No Recall production code is included. The optional inference help
 uses a pinned, unmodified llama.cpp library and verified EmbeddingGemma 2 GGUF models.
 
 ```sh
-nixe-glimpse models setup       # explicit build; no model download
-nixe-glimpse models download    # explicit 865 MB download and checksum verification
+nyx-glimpse models setup       # explicit build; no model download
+nyx-glimpse models download    # explicit 865 MB download and checksum verification
 ```
 
 For ordinary use, simply enable Local AI in Settings → Desktop → Glimpse. It prepares the engine and downloads the package automatically; the commands above remain available for manual maintenance. CPU is supported by
@@ -72,15 +72,15 @@ plugins from a local folder or HTTPS Git repository plus immutable commit hash.
 Installed plugins start disabled. Review permissions, then enable them.
 
 ```sh
-nixe-glimpse plugins install quick-tools
-nixe-glimpse plugins enable quick-tools --approve-permissions
-nixe-glimpse plugins install-local ./my-plugin
-nixe-glimpse plugins install-git https://example.org/plugin.git FULL_COMMIT_HASH
-nixe-glimpse plugins link-local ./my-plugin     # explicit development mode
-nixe-glimpse plugins disable my-plugin
-nixe-glimpse plugins update my-plugin
-nixe-glimpse plugins rollback my-plugin
-nixe-glimpse plugins remove my-plugin          # retains private settings/data
+nyx-glimpse plugins install quick-tools
+nyx-glimpse plugins enable quick-tools --approve-permissions
+nyx-glimpse plugins install-local ./my-plugin
+nyx-glimpse plugins install-git https://example.org/plugin.git FULL_COMMIT_HASH
+nyx-glimpse plugins link-local ./my-plugin     # explicit development mode
+nyx-glimpse plugins disable my-plugin
+nyx-glimpse plugins update my-plugin
+nyx-glimpse plugins rollback my-plugin
+nyx-glimpse plugins remove my-plugin          # retains private settings/data
 ```
 
 Plugins add results, commands, previews, file readers, and native settings without
@@ -92,19 +92,19 @@ never runs plugin setup scripts. See [PLUGIN_API.md](PLUGIN_API.md) and examples
 
 ## Data and management
 
-Preferences: `$XDG_CONFIG_HOME/nixe-glimpse/settings.toml`.
-Indexes, models, plugins: `$XDG_DATA_HOME/nixe-glimpse`.
-Private operational state: `$XDG_STATE_HOME/nixe-glimpse`.
+Preferences: `$XDG_CONFIG_HOME/nyx-glimpse/settings.toml`.
+Indexes, models, plugins: `$XDG_DATA_HOME/nyx-glimpse`.
+Private operational state: `$XDG_STATE_HOME/nyx-glimpse`.
 The standard XDG fallbacks apply. There is no stored search history or telemetry.
 Enabled network plugins can receive queries; their permission is visible before enablement.
 
 ```sh
-nixe-glimpse index pause
-nixe-glimpse index resume
-nixe-glimpse index scan
-nixe-glimpse index status
-nixe-glimpse sources exclude /absolute/folder
-nixe-glimpse diagnostics
+nyx-glimpse index pause
+nyx-glimpse index resume
+nyx-glimpse index scan
+nyx-glimpse index status
+nyx-glimpse sources exclude /absolute/folder
+nyx-glimpse diagnostics
 ./uninstall.sh glimpse             # restores integration, retains user data
 ./uninstall.sh glimpse --purge     # also deletes preferences, indexes and models
 ```
@@ -118,10 +118,10 @@ Currency conversions automatically use daily Frankfurter rates, cached locally f
 During implementation, use compile checks. At the final checkpoint:
 
 ```sh
-cargo fmt -p nixe-glimpse -p glimpse-plugin-sdk --check
-cargo test -p nixe-glimpse
-cargo clippy -p nixe-glimpse -p glimpse-plugin-sdk --all-targets -- -D warnings
-cargo test -p nixe-glimpse --test semantic -- --ignored
+cargo fmt -p nyx-glimpse -p glimpse-plugin-sdk --check
+cargo test -p nyx-glimpse
+cargo clippy -p nyx-glimpse -p glimpse-plugin-sdk --all-targets -- -D warnings
+cargo test -p nyx-glimpse --test semantic -- --ignored
 ```
 
 The last test requires the explicitly installed models/runtime and exercises real
@@ -148,6 +148,6 @@ Interrupted setup resumes when Glimpse next opens; failures expose Retry.
 
 Appearance has only Follow Omarchy and a theme selector. Following Omarchy disables
 the selector while retaining its selected value. Theme preferences remain shared across
-Nixe apps. Changing status values updates labels in place without rebuilding Settings.
+Nyx apps. Changing status values updates labels in place without rebuilding Settings.
 Advanced device, indexing-limit, manual-rate, diagnostic, and maintenance operations
 remain available through CLI/configuration rather than occupying the main Settings page.

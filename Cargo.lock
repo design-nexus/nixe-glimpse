@@ -757,69 +757,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nixe-core"
-version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-core.git?rev=87682e6c936b6a4f006639b1a1c099e96346c07c#87682e6c936b6a4f006639b1a1c099e96346c07c"
-dependencies = [
- "anyhow",
- "gtk4",
- "serde",
- "serde_json",
- "toml",
-]
-
-[[package]]
-name = "nixe-glimpse"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "glimpse-plugin-sdk",
- "gtk4",
- "libc",
- "nixe-core",
- "nixe-passwords-proto",
- "nixe-theme",
- "nixe-ui",
- "notify",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "syntect",
- "tempfile",
- "toml",
-]
-
-[[package]]
-name = "nixe-passwords-proto"
-version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-passwords.git?rev=284b0a01d767b510308602b53d6cb3887d38bb68#284b0a01d767b510308602b53d6cb3887d38bb68"
-dependencies = [
- "gio",
-]
-
-[[package]]
-name = "nixe-theme"
-version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-design.git?rev=b8204de80644e263e32783602f2e0ae393578c9e#b8204de80644e263e32783602f2e0ae393578c9e"
-dependencies = [
- "gtk4",
- "nixe-core",
- "serde",
- "toml",
-]
-
-[[package]]
-name = "nixe-ui"
-version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-design.git?rev=b8204de80644e263e32783602f2e0ae393578c9e#b8204de80644e263e32783602f2e0ae393578c9e"
-dependencies = [
- "gtk4",
- "nixe-core",
- "nixe-theme",
-]
-
-[[package]]
 name = "notify"
 version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -844,6 +781,69 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42b8cfee0e339a0337359f3c88165702ac6e600dc01c0cc9579a92d62b08477a"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "nyx-core"
+version = "0.1.0"
+source = "git+https://github.com/design-nexus/nyx-core.git?rev=52cba5e27a3dd5f00c780f53e423302b4b5f9c9c#52cba5e27a3dd5f00c780f53e423302b4b5f9c9c"
+dependencies = [
+ "anyhow",
+ "gtk4",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "nyx-glimpse"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glimpse-plugin-sdk",
+ "gtk4",
+ "libc",
+ "notify",
+ "nyx-core",
+ "nyx-passwords-proto",
+ "nyx-theme",
+ "nyx-ui",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "syntect",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "nyx-passwords-proto"
+version = "0.1.0"
+source = "git+https://github.com/design-nexus/nyx-passwords.git?rev=f30ea2887724df67870a066228e737cf278f33a0#f30ea2887724df67870a066228e737cf278f33a0"
+dependencies = [
+ "gio",
+]
+
+[[package]]
+name = "nyx-theme"
+version = "0.1.0"
+source = "git+https://github.com/design-nexus/nyx-design.git?rev=938c638951a53f5874a8276d07ac9dcd68b191ad#938c638951a53f5874a8276d07ac9dcd68b191ad"
+dependencies = [
+ "gtk4",
+ "nyx-core",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "nyx-ui"
+version = "0.1.0"
+source = "git+https://github.com/design-nexus/nyx-design.git?rev=938c638951a53f5874a8276d07ac9dcd68b191ad#938c638951a53f5874a8276d07ac9dcd68b191ad"
+dependencies = [
+ "gtk4",
+ "nyx-core",
+ "nyx-theme",
 ]
 
 [[package]]

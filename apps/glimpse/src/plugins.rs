@@ -58,6 +58,35 @@ fn registry(p: &Paths) -> Result<BTreeMap<String, Grant>> {
 fn save_registry(p: &Paths, g: &BTreeMap<String, Grant>) -> Result<()> {
     config::atomic_write(&registry_path(p), &serde_json::to_vec_pretty(g)?)
 }
+/// Plugins installed before the suite was called Nyx have `nixe-<app>` ids. Their grants
+/// and storage move to `nyx-<app>`; the old packages are removed, as each app's installer
+/// adds the renamed one. Safe to call on every start.
+pub fn migrate_nixe(p: &Paths) -> Result<()> {
+    let renamed = |id: &str| id.strip_prefix("nixe-").map(|name| format!("nyx-{name}"));
+    let mut reg = registry(p)?;
+    let old: Vec<String> = reg.keys().filter(|id| renamed(id).is_some()).cloned().collect();
+    for id in &old {
+        if let (Some(new), Some(grant)) = (renamed(id), reg.remove(id)) {
+            reg.entry(new).or_insert(grant);
+        }
+    }
+    if !old.is_empty() {
+        save_registry(p, &reg)?;
+    }
+    for (folder, keep) in [(p.data.join("plugins"), false), (p.data.join("plugin-storage"), true)] {
+        let Ok(entries) = fs::read_dir(&folder) else { continue };
+        for entry in entries.flatten() {
+            let Some(new) = renamed(&entry.file_name().to_string_lossy()) else { continue };
+            let new = folder.join(new);
+            if keep && !new.exists() {
+                fs::rename(entry.path(), new)?;
+            } else {
+                fs::remove_dir_all(entry.path())?;
+            }
+        }
+    }
+    Ok(())
+}
 pub fn load(dir: &Path) -> Result<Manifest> {
     let m: Manifest = toml::from_str(&fs::read_to_string(dir.join("plugin.toml"))?)?;
     if !valid_id(&m.id)
@@ -346,16 +375,16 @@ fn xdg_data_home() -> PathBuf {
 }
 
 fn news_library_dir() -> PathBuf {
-    xdg_data_home().join("nixe-news")
+    xdg_data_home().join("nyx-news")
 }
 
 fn capture_library_dir() -> PathBuf {
-    xdg_data_home().join("nixe-capture")
+    xdg_data_home().join("nyx-capture")
 }
 
 /// Read-only mount of the News library for the News plugin. Returns the database path inside the sandbox.
 fn bind_news_library(cmd: &mut Command, plugin_id: &str, dir: &Path) -> Option<&'static str> {
-    if plugin_id != "nixe-news" || !dir.is_dir() {
+    if plugin_id != "nyx-news" || !dir.is_dir() {
         return None;
     }
     cmd.arg("--ro-bind").arg(dir).arg("/news-library");
@@ -364,7 +393,7 @@ fn bind_news_library(cmd: &mut Command, plugin_id: &str, dir: &Path) -> Option<&
 
 /// Read-only mount of the Capture library for the Capture plugin. Returns the database path inside the sandbox.
 fn bind_capture_library(cmd: &mut Command, plugin_id: &str, dir: &Path) -> Option<&'static str> {
-    if plugin_id != "nixe-capture" || !dir.is_dir() {
+    if plugin_id != "nyx-capture" || !dir.is_dir() {
         return None;
     }
     cmd.arg("--ro-bind").arg(dir).arg("/capture-library");
@@ -430,8 +459,8 @@ fn sandbox(p: &Paths, plugin: &Plugin, read_one: Option<&Path>) -> Result<Comman
     // News and Capture keep libraries under ~/.local, which selected sources cannot name.
     // Mount that one folder, not the rest of the hidden path.
     let news_db = bind_news_library(&mut cmd, &plugin.manifest.id, &news_library_dir());
-    let notes_dir=xdg_data_home().join("nixe-notes/glimpse");
-    let notes_db=if plugin.manifest.id=="nixe-notes"&&notes_dir.is_dir(){cmd.arg("--ro-bind").arg(&notes_dir).arg("/notes-library");Some("/notes-library/launcher.sqlite")}else{None};
+    let notes_dir=xdg_data_home().join("nyx-notes/glimpse");
+    let notes_db=if plugin.manifest.id=="nyx-notes"&&notes_dir.is_dir(){cmd.arg("--ro-bind").arg(&notes_dir).arg("/notes-library");Some("/notes-library/launcher.sqlite")}else{None};
     let capture_db = bind_capture_library(&mut cmd, &plugin.manifest.id, &capture_library_dir());
     // Mail, Calendar and Reminders: one database file each, nothing else of theirs.
     let pim_db = crate::pim::bind(&mut cmd, &plugin.manifest.id, &xdg_data_home());
@@ -450,15 +479,15 @@ fn sandbox(p: &Paths, plugin: &Plugin, read_one: Option<&Path>) -> Result<Comman
         "/storage",
     ]);
     if let Some(db) = news_db {
-        cmd.args(["--setenv", "NIXE_NEWS_DB", db]);
+        cmd.args(["--setenv", "NYX_NEWS_DB", db]);
     }
     if let Some((key, db)) = pim_db {
         cmd.args(["--setenv", key, db]);
     }
     if let Some(db) = capture_db {
-        cmd.args(["--setenv", "NIXE_CAPTURE_DB", db]);
+        cmd.args(["--setenv", "NYX_CAPTURE_DB", db]);
     }
-    if let Some(db)=notes_db{cmd.args(["--setenv","NIXE_NOTES_INDEX",db]);}
+    if let Some(db)=notes_db{cmd.args(["--setenv","NYX_NOTES_INDEX",db]);}
     cmd.arg("--");
     let executable = &plugin.manifest.exec[0];
     let exe = if executable.contains('/') {
@@ -612,9 +641,9 @@ pub fn valid_action(p: &Paths, plugin: &Plugin, a: &Action) -> bool {
         Action::Activate { token } => token.len() <= 4096,
     }
 }
-/// Host-side Capture commands. The plugin cannot spawn GTK; Glimpse launches `nixe-capture` instead.
+/// Host-side Capture commands. The plugin cannot spawn GTK; Glimpse launches `nyx-capture` instead.
 pub fn capture_host_args(plugin_id: &str, token: &str) -> Option<&'static str> {
-    if plugin_id != "nixe-capture" {
+    if plugin_id != "nyx-capture" {
         return None;
     }
     match token {
@@ -634,12 +663,12 @@ pub fn spawn_capture(flag: &str) -> Result<()> {
 
 fn capture_executable() -> PathBuf {
     if let Some(home) = std::env::var_os("HOME") {
-        let local = PathBuf::from(home).join(".local/bin/nixe-capture");
+        let local = PathBuf::from(home).join(".local/bin/nyx-capture");
         if local.is_file() {
             return local;
         }
     }
-    PathBuf::from("nixe-capture")
+    PathBuf::from("nyx-capture")
 }
 
 pub fn activate(p: &Paths, id: &str, token: &str) -> Result<Action> {
@@ -674,7 +703,7 @@ pub fn catalog(p: &Paths, refresh: bool) -> Result<Vec<CatalogEntry>> {
                 "-fLsS",
                 "--max-time",
                 "10",
-                "https://raw.githubusercontent.com/design-nexus/nixe-glimpse/main/apps/glimpse/data/plugins.json",
+                "https://raw.githubusercontent.com/design-nexus/nyx-glimpse/main/apps/glimpse/data/plugins.json",
             ]);
             let out = process::capture(c, vec![], Duration::from_secs(12), 1024 * 1024)?;
             let _: Vec<CatalogEntry> = serde_json::from_slice(&out).context("invalid online catalog")?;
@@ -765,6 +794,31 @@ fn notes_host_args(token:&str)->Result<Vec<String>>{
     let _=(request.offset,request.append);Ok(vec!["--launcher-action".into(),token.into()])
 }
 pub fn notes_host_action(paths:&Paths,id:&str,token:&str)->Option<Result<()>>{
-    if id!="nixe-notes"{return None;}Some((||{let plugin=get(paths,id)?;if !plugin.grant.enabled||plugin.grant.version!=plugin.manifest.version||plugin.grant.requested!=plugin.manifest.permissions{bail!("Notes plugin permission was revoked or changed");}let args=notes_host_args(token)?;let local=std::env::var_os("HOME").map(PathBuf::from).map(|h|h.join(".local/bin/nixe-notes"));let exe=local.filter(|p|p.is_file()).unwrap_or_else(||PathBuf::from("nixe-notes"));Command::new(&exe).args(args).spawn().with_context(||format!("Could not start {}",exe.display()))?;Ok(())})())
+    if id!="nyx-notes"{return None;}Some((||{let plugin=get(paths,id)?;if !plugin.grant.enabled||plugin.grant.version!=plugin.manifest.version||plugin.grant.requested!=plugin.manifest.permissions{bail!("Notes plugin permission was revoked or changed");}let args=notes_host_args(token)?;let local=std::env::var_os("HOME").map(PathBuf::from).map(|h|h.join(".local/bin/nyx-notes"));let exe=local.filter(|p|p.is_file()).unwrap_or_else(||PathBuf::from("nyx-notes"));Command::new(&exe).args(args).spawn().with_context(||format!("Could not start {}",exe.display()))?;Ok(())})())
 }
 #[cfg(test)]mod notes_action_tests{use super::*;#[test]fn notes_actions_never_execute_arbitrary_commands(){assert!(notes_host_args(r#"{"api_version":1,"op":"create","vault":"/home/test/Notes","title":"Research; echo nope"}"#).is_ok());assert!(notes_host_args(r#"{"api_version":1,"op":"exec","vault":"/home/test/Notes","title":"shell"}"#).is_err());assert!(notes_host_args(r#"{"api_version":1,"op":"open","vault":"/home/test/Notes","path":"/home/test/Notes/../secret.md"}"#).is_err());assert!(notes_host_args(r#"{"api_version":1,"op":"create","vault":"/home/test/Notes","title":"../escape"}"#).is_err());}}
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+
+    #[test]
+    fn nixe_plugins_move_to_their_nyx_ids() {
+        let root = tempfile::tempdir().unwrap();
+        let p = Paths { config: root.path().join("c"), data: root.path().join("d"), state: root.path().join("s") };
+        fs::create_dir_all(&p.config).unwrap();
+        fs::create_dir_all(p.data.join("plugins/nixe-notes")).unwrap();
+        fs::create_dir_all(p.data.join("plugin-storage/nixe-mail")).unwrap();
+        fs::write(p.data.join("plugin-storage/nixe-mail/state"), "kept").unwrap();
+        let grant = Grant { enabled: true, version: "0.5.0".into(), ..Default::default() };
+        save_registry(&p, &BTreeMap::from([("nixe-notes".to_string(), grant)])).unwrap();
+
+        migrate_nixe(&p).unwrap();
+        let reg = registry(&p).unwrap();
+        assert!(reg["nyx-notes"].enabled && !reg.contains_key("nixe-notes"));
+        assert!(!p.data.join("plugins/nixe-notes").exists());
+        assert_eq!(fs::read_to_string(p.data.join("plugin-storage/nyx-mail/state")).unwrap(), "kept");
+        // A second run changes nothing.
+        migrate_nixe(&p).unwrap();
+        assert!(registry(&p).unwrap()["nyx-notes"].enabled);
+    }
+}

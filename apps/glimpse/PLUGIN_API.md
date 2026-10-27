@@ -77,7 +77,7 @@ demonstrates a custom format and a native switch. `examples/rust-plugin` uses th
 ```sh
 cargo build --release --manifest-path apps/glimpse/examples/rust-plugin/Cargo.toml
 cp apps/glimpse/examples/rust-plugin/target/release/text-tools apps/glimpse/examples/rust-plugin/text-tools
-nixe-glimpse plugins install-local apps/glimpse/examples/rust-plugin
+nyx-glimpse plugins install-local apps/glimpse/examples/rust-plugin
 ```
 
 For rapid development, use `plugins link-local DIRECTORY`. It is explicit and starts

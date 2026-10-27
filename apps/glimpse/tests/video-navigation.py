@@ -16,8 +16,8 @@ import time
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
-APP_ID = 'io.github.design_nexus.nixe.Glimpse'
-BINARY = os.environ.get('GLIMPSE_TEST_BINARY', str(Path(__file__).resolve().parents[3] / 'target/release/nixe-glimpse'))
+APP_ID = 'io.github.design_nexus.nyx.Glimpse'
+BINARY = os.environ.get('GLIMPSE_TEST_BINARY', str(Path(__file__).resolve().parents[3] / 'target/release/nyx-glimpse'))
 
 def dispatch(code):
     subprocess.run(['hyprctl', 'dispatch', code], check=True, stdout=subprocess.DEVNULL)
@@ -33,7 +33,7 @@ def active():
 def follow_mouse():
     return subprocess.check_output(['hyprctl', 'getoption', 'input.follow_mouse'], text=True).splitlines()[0]
 
-assert subprocess.run(['pgrep', '-x', 'nixe-glimpse'], stdout=subprocess.DEVNULL).returncode != 0, 'Close Glimpse before running this test'
+assert subprocess.run(['pgrep', '-x', 'nyx-glimpse'], stdout=subprocess.DEVNULL).returncode != 0, 'Close Glimpse before running this test'
 original_follow = follow_mouse()
 original_cursor = subprocess.check_output(['hyprctl', 'cursorpos'], text=True).strip().split(', ')
 with tempfile.TemporaryDirectory(prefix='glimpse-video-navigation-') as temp:
@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='glimpse-video-navigation-') as temp:
     for name, folder in [('XDG_CONFIG_HOME', 'config'), ('XDG_DATA_HOME', 'data'), ('XDG_STATE_HOME', 'state')]:
         env[name] = str(base / folder)
     env['GLIMPSE_APP_ID'] = APP_ID
-    config = base / 'config/nixe-glimpse'
+    config = base / 'config/nyx-glimpse'
     config.mkdir(parents=True)
     (config / 'settings.toml').write_text(f'roots = [{json.dumps(str(root))}]\npreview = true\nsemantic = false\nsemantic_requested = false\n')
     subprocess.run([BINARY, 'index', 'scan'], env=env, check=True, stdout=subprocess.DEVNULL)

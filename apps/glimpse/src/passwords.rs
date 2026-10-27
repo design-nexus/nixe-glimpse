@@ -1,4 +1,4 @@
-//! Reading a `pw …` query (Nixe Passwords). A query whose first word is `pw` or
+//! Reading a `pw …` query (Nyx Passwords). A query whose first word is `pw` or
 //! `password` belongs to the vault alone: no other provider, plugin or semantic search
 //! sees it.
 

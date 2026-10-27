@@ -1,10 +1,10 @@
-//! The `pw` provider: rows from the Nixe Passwords daemon and what Enter does to them.
+//! The `pw` provider: rows from the Nyx Passwords daemon and what Enter does to them.
 //! Rows carry an item's id and metadata, never a secret; copies happen in the daemon,
 //! which owns the clipboard (and clears it), so Glimpse can close at once.
 
 use gtk::{gio, glib, prelude::*};
-use nixe_glimpse::passwords::{Query, Special, Verb};
-use nixe_passwords_proto::{Error as Code, client, state};
+use nyx_glimpse::passwords::{Query, Special, Verb};
+use nyx_passwords_proto::{Error as Code, client, state};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Pw {
@@ -193,12 +193,12 @@ pub fn activate(pw: &Pw, verb: Option<Verb>, window: &gtk::ApplicationWindow, st
             }
             Pw::Generate => client::call("Generate", None).await.map(|_| ()).map_err(message),
             Pw::Lock => client::call("Lock", None).await.map(|_| ()).map_err(message),
-            Pw::Unlock | Pw::SignIn => std::process::Command::new("nixe-passwords")
+            Pw::Unlock | Pw::SignIn => std::process::Command::new("nyx-passwords")
                 .arg("--unlock")
                 .spawn()
                 .map(|_| ())
                 .map_err(|_| "Couldn't open Passwords".to_string()),
-            Pw::Unavailable => Err("Install Passwords with: nixe install passwords".to_string()),
+            Pw::Unavailable => Err("Install Passwords with: nyx install passwords".to_string()),
             Pw::Help => return,
         };
         match done {

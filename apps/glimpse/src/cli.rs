@@ -15,7 +15,7 @@ pub fn dispatch(a: &[String]) -> Result<bool> {
     };
     match op {
         "--help" | "-h" => println!(
-            "Glimpse — local universal search\n\n nixe-glimpse [--toggle] [--add-folder] [--plugins]\n nixe-glimpse sources add|remove|exclude|code PATH\n nixe-glimpse index scan|status|pause|resume|purge\n nixe-glimpse models status|setup|download [--text-only]\n nixe-glimpse plugins list|catalog [--refresh]|install ID\n nixe-glimpse plugins link-local DIR (development)\n nixe-glimpse plugins install-local DIR | install-git URL COMMIT [FOLDER]\n nixe-glimpse plugins enable ID --approve-permissions\n nixe-glimpse plugins disable|remove|update|rollback ID [--purge]\n nixe-glimpse plugins update-from DIR\n nixe-glimpse integration window|enable|disable|restore\n nixe-glimpse service enable|disable\n nixe-glimpse search QUERY\n nixe-glimpse diagnostics"
+            "Glimpse — local universal search\n\n nyx-glimpse [--toggle] [--add-folder] [--plugins]\n nyx-glimpse sources add|remove|exclude|code PATH\n nyx-glimpse index scan|status|pause|resume|purge\n nyx-glimpse models status|setup|download [--text-only]\n nyx-glimpse plugins list|catalog [--refresh]|install ID\n nyx-glimpse plugins link-local DIR (development)\n nyx-glimpse plugins install-local DIR | install-git URL COMMIT [FOLDER]\n nyx-glimpse plugins enable ID --approve-permissions\n nyx-glimpse plugins disable|remove|update|rollback ID [--purge]\n nyx-glimpse plugins update-from DIR\n nyx-glimpse integration window|enable|disable|restore\n nyx-glimpse service enable|disable\n nyx-glimpse search QUERY\n nyx-glimpse diagnostics"
         ),
         "sources" => {
             let cmd = arg(a, 1)?;
@@ -180,19 +180,19 @@ pub fn clear_semantic(p: &Paths) -> Result<()> {
     let live = p.config == installed.config && p.data == installed.data;
     let was_running = live
         && Command::new("systemctl")
-            .args(["--user", "is-active", "--quiet", "nixe-glimpsed.service"])
+            .args(["--user", "is-active", "--quiet", "nyx-glimpsed.service"])
             .status()
             .is_ok_and(|s| s.success());
     if was_running {
         let mut c = Command::new("systemctl");
-        c.args(["--user", "stop", "nixe-glimpsed.service"]);
+        c.args(["--user", "stop", "nyx-glimpsed.service"]);
         crate::process::capture(c, vec![], std::time::Duration::from_secs(10), 65536)?;
     }
     let dir = p.data.join("semantic-index");
     let result = if dir.exists() { fs::remove_dir_all(dir).map_err(anyhow::Error::from) } else { Ok(()) };
     if was_running {
         let mut c = Command::new("systemctl");
-        c.args(["--user", "start", "nixe-glimpsed.service"]);
+        c.args(["--user", "start", "nyx-glimpsed.service"]);
         crate::process::capture(c, vec![], std::time::Duration::from_secs(10), 65536)?;
     }
     result

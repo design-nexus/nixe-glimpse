@@ -4,12 +4,12 @@
 //! credentials). The sandbox can't start apps or open links, so the results'
 //! actions run here, from a small JSON token checked field by field:
 //!
-//! - Mail: `{"app": "mail", "op": "open", "message": ID}` → `nixe-mail --message ID`
+//! - Mail: `{"app": "mail", "op": "open", "message": ID}` → `nyx-mail --message ID`
 //! - Calendar: `{"app": "calendar", "op": "open", "day": "YYYY-MM-DD"}` →
-//!   `nixe-calendar --date DAY`; `{"op": "join", "url": "https://…"}` opens a
+//!   `nyx-calendar --date DAY`; `{"op": "join", "url": "https://…"}` opens a
 //!   meeting link, only on known meeting hosts
-//! - Reminders: `{"op": "open", "list": UID}` → `nixe-reminders --section list:UID`;
-//!   `{"op": "add", "text": …}` → `nixe-reminders --add TEXT`
+//! - Reminders: `{"op": "open", "list": UID}` → `nyx-reminders --section list:UID`;
+//!   `{"op": "add", "text": …}` → `nyx-reminders --add TEXT`
 //!
 //! Tokens carry `"api_version": 1`, and one plugin can only act for its own app.
 //! Programs get their arguments directly, never through a shell.
@@ -30,9 +30,9 @@ struct Library {
 }
 
 const LIBRARIES: [Library; 3] = [
-    Library { plugin: "nixe-mail", file: "nixe-mail/mail.sqlite", mount: "/mail-library/mail.sqlite", env: "NIXE_MAIL_DB" },
-    Library { plugin: "nixe-calendar", file: "nixe-calendar/agenda.sqlite", mount: "/calendar-library/agenda.sqlite", env: "NIXE_CALENDAR_DB" },
-    Library { plugin: "nixe-reminders", file: "nixe-reminders/tasks.sqlite", mount: "/reminders-library/tasks.sqlite", env: "NIXE_REMINDERS_DB" },
+    Library { plugin: "nyx-mail", file: "nyx-mail/mail.sqlite", mount: "/mail-library/mail.sqlite", env: "NYX_MAIL_DB" },
+    Library { plugin: "nyx-calendar", file: "nyx-calendar/agenda.sqlite", mount: "/calendar-library/agenda.sqlite", env: "NYX_CALENDAR_DB" },
+    Library { plugin: "nyx-reminders", file: "nyx-reminders/tasks.sqlite", mount: "/reminders-library/tasks.sqlite", env: "NYX_REMINDERS_DB" },
 ];
 
 /// Mounts the plugin's database (and Mail's write-ahead log beside it)
@@ -88,9 +88,9 @@ fn meeting_link(url: &str) -> bool {
 /// Checks a token from `plugin_id`; `None` when it isn't one of these apps'.
 pub fn parse(plugin_id: &str, token: &str) -> Option<Result<Launch>> {
     let app = match plugin_id {
-        "nixe-mail" => "mail",
-        "nixe-calendar" => "calendar",
-        "nixe-reminders" => "reminders",
+        "nyx-mail" => "mail",
+        "nyx-calendar" => "calendar",
+        "nyx-reminders" => "reminders",
         _ => return None,
     };
     Some((|| {
@@ -105,13 +105,13 @@ pub fn parse(plugin_id: &str, token: &str) -> Option<Result<Launch>> {
         Ok(match (app, v["op"].as_str().unwrap_or("")) {
             ("mail", "open") => {
                 let id = v["message"].as_i64().filter(|n| *n > 0).context("no message")?;
-                Launch::Program("nixe-mail", vec!["--message".into(), id.to_string()])
+                Launch::Program("nyx-mail", vec!["--message".into(), id.to_string()])
             }
-            ("calendar", "open") if day(&text("day")) => Launch::Program("nixe-calendar", vec!["--date".into(), text("day")]),
+            ("calendar", "open") if day(&text("day")) => Launch::Program("nyx-calendar", vec!["--date".into(), text("day")]),
             ("calendar", "join") if meeting_link(&text("url")) => Launch::Link(text("url")),
             ("calendar", "join") => bail!("that isn't a meeting link Glimpse opens"),
             ("reminders", "open") if list_uid(&text("list")) => {
-                Launch::Program("nixe-reminders", vec!["--section".into(), format!("list:{}", text("list"))])
+                Launch::Program("nyx-reminders", vec!["--section".into(), format!("list:{}", text("list"))])
             }
             ("reminders", "add") => {
                 let words = text("text");
@@ -119,7 +119,7 @@ pub fn parse(plugin_id: &str, token: &str) -> Option<Result<Launch>> {
                     bail!("that reminder can't be added");
                 }
                 // A leading dash would read as an option.
-                Launch::Program("nixe-reminders", vec!["--add".into(), words.trim_start_matches('-').trim().to_string()])
+                Launch::Program("nyx-reminders", vec!["--add".into(), words.trim_start_matches('-').trim().to_string()])
             }
             _ => bail!("unsupported action"),
         })
@@ -167,31 +167,31 @@ mod tests {
 
     #[test]
     fn tokens_are_checked() {
-        assert!(parse("nixe-news", "{}").is_none());
+        assert!(parse("nyx-news", "{}").is_none());
         assert_eq!(
-            launch("nixe-mail", r#"{"api_version":1,"app":"mail","op":"open","message":42}"#).unwrap(),
-            Launch::Program("nixe-mail", vec!["--message".into(), "42".into()])
+            launch("nyx-mail", r#"{"api_version":1,"app":"mail","op":"open","message":42}"#).unwrap(),
+            Launch::Program("nyx-mail", vec!["--message".into(), "42".into()])
         );
         // A plugin acts only for its own app.
-        assert!(launch("nixe-mail", r#"{"api_version":1,"app":"reminders","op":"add","text":"x"}"#).is_err());
-        assert!(launch("nixe-mail", r#"{"api_version":2,"app":"mail","op":"open","message":42}"#).is_err());
-        assert!(launch("nixe-mail", r#"{"api_version":1,"app":"mail","op":"open","message":"42; rm"}"#).is_err());
+        assert!(launch("nyx-mail", r#"{"api_version":1,"app":"reminders","op":"add","text":"x"}"#).is_err());
+        assert!(launch("nyx-mail", r#"{"api_version":2,"app":"mail","op":"open","message":42}"#).is_err());
+        assert!(launch("nyx-mail", r#"{"api_version":1,"app":"mail","op":"open","message":"42; rm"}"#).is_err());
         assert_eq!(
-            launch("nixe-calendar", r#"{"api_version":1,"app":"calendar","op":"open","day":"2026-10-21"}"#).unwrap(),
-            Launch::Program("nixe-calendar", vec!["--date".into(), "2026-10-21".into()])
+            launch("nyx-calendar", r#"{"api_version":1,"app":"calendar","op":"open","day":"2026-10-21"}"#).unwrap(),
+            Launch::Program("nyx-calendar", vec!["--date".into(), "2026-10-21".into()])
         );
-        assert!(launch("nixe-calendar", r#"{"api_version":1,"app":"calendar","op":"open","day":"--help"}"#).is_err());
+        assert!(launch("nyx-calendar", r#"{"api_version":1,"app":"calendar","op":"open","day":"--help"}"#).is_err());
         assert_eq!(
-            launch("nixe-reminders", r#"{"api_version":1,"app":"reminders","op":"add","text":"--section x call Sam"}"#).unwrap(),
-            Launch::Program("nixe-reminders", vec!["--add".into(), "section x call Sam".into()])
+            launch("nyx-reminders", r#"{"api_version":1,"app":"reminders","op":"add","text":"--section x call Sam"}"#).unwrap(),
+            Launch::Program("nyx-reminders", vec!["--add".into(), "section x call Sam".into()])
         );
-        assert!(launch("nixe-reminders", r#"{"api_version":1,"app":"reminders","op":"open","list":"a/../b"}"#).is_err());
-        assert!(launch("nixe-reminders", r#"{"api_version":1,"app":"reminders","op":"add","text":"a\nb"}"#).is_err());
+        assert!(launch("nyx-reminders", r#"{"api_version":1,"app":"reminders","op":"open","list":"a/../b"}"#).is_err());
+        assert!(launch("nyx-reminders", r#"{"api_version":1,"app":"reminders","op":"add","text":"a\nb"}"#).is_err());
     }
 
     #[test]
     fn only_meeting_links_open() {
-        let join = |url: &str| launch("nixe-calendar", &serde_json::json!({"api_version":1,"app":"calendar","op":"join","url":url}).to_string());
+        let join = |url: &str| launch("nyx-calendar", &serde_json::json!({"api_version":1,"app":"calendar","op":"join","url":url}).to_string());
         assert_eq!(join("https://meet.google.com/abc-defg-hij").unwrap(), Launch::Link("https://meet.google.com/abc-defg-hij".into()));
         assert!(join("https://acme.zoom.us/j/123").is_ok());
         assert!(join("http://meet.google.com/abc").is_err());
@@ -205,15 +205,15 @@ mod tests {
     #[test]
     fn mounts_only_the_database() {
         let home = std::env::temp_dir().join(format!("glimpse-pim-{}", std::process::id()));
-        std::fs::create_dir_all(home.join("nixe-mail/store")).unwrap();
-        std::fs::write(home.join("nixe-mail/mail.sqlite"), b"").unwrap();
-        std::fs::write(home.join("nixe-mail/mail.sqlite-wal"), b"").unwrap();
+        std::fs::create_dir_all(home.join("nyx-mail/store")).unwrap();
+        std::fs::write(home.join("nyx-mail/mail.sqlite"), b"").unwrap();
+        std::fs::write(home.join("nyx-mail/mail.sqlite-wal"), b"").unwrap();
         let mut cmd = Command::new("bwrap");
-        assert_eq!(bind(&mut cmd, "nixe-mail", &home), Some(("NIXE_MAIL_DB", "/mail-library/mail.sqlite")));
+        assert_eq!(bind(&mut cmd, "nyx-mail", &home), Some(("NYX_MAIL_DB", "/mail-library/mail.sqlite")));
         let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args.iter().filter(|a| *a == "--ro-bind").count(), 2);
         assert!(!args.iter().any(|a| a.contains("store")));
-        assert!(bind(&mut Command::new("bwrap"), "nixe-calendar", &home).is_none(), "no agenda yet");
+        assert!(bind(&mut Command::new("bwrap"), "nyx-calendar", &home).is_none(), "no agenda yet");
         let _ = std::fs::remove_dir_all(home);
     }
 }

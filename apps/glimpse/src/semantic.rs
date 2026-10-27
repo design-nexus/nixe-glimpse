@@ -95,7 +95,7 @@ fn ensure_models(p: &Paths, text_only: bool) -> Result<()> {
 }
 fn command(p: &Paths) -> Result<Command> {
     if !runtime(p).is_file() {
-        bail!("semantic runtime unavailable; run nixe-glimpse models setup");
+        bail!("semantic runtime unavailable; run nyx-glimpse models setup");
     }
     let mut c = Command::new(runtime(p));
     c.env("GLIMPSE_MODELS", p.data.join("Models")).env("GLIMPSE_GGML_DIR", p.data.join("runtime/lib"));

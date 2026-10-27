@@ -2,8 +2,8 @@
 # Build Glimpse's own inference wrapper against pinned, unmodified llama.cpp.
 set -euo pipefail
 here=$(cd "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-base="${XDG_DATA_HOME:-$HOME/.local/share}/nixe-glimpse"
-build="${XDG_CACHE_HOME:-$HOME/.cache}/nixe-glimpse/inference-build"
+base="${XDG_DATA_HOME:-$HOME/.local/share}/nyx-glimpse"
+build="${XDG_CACHE_HOME:-$HOME/.cache}/nyx-glimpse/inference-build"
 jobs="${GLIMPSE_BUILD_JOBS:-4}"
 [[ $jobs =~ ^[1-9][0-9]*$ ]] && ((jobs <= 16)) || { echo "Choose 1–16 build jobs." >&2; exit 1; }
 for tool in cargo cmake git c++; do command -v "$tool" >/dev/null || { echo "Missing build tool: $tool" >&2; exit 1; }; done

@@ -103,7 +103,7 @@ fn spawn(p: &Paths, retry: bool) -> Result<()> {
     if alive(&s) || (!retry && s["failed"] == true) {
         return Ok(());
     }
-    Command::new(std::env::current_exe()?.with_file_name("nixe-glimpse-settings"))
+    Command::new(std::env::current_exe()?.with_file_name("nyx-glimpse-settings"))
         .args(["run-ai-setup"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

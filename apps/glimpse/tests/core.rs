@@ -1,4 +1,4 @@
-use nixe_glimpse::{
+use nyx_glimpse::{
     config::{self, Config, Paths},
     index, integration, plugins, process, semantic, utility,
 };
@@ -177,7 +177,7 @@ fn integration_preserves_edits_and_rejects_tampering() {
     assert_eq!(integration::edit(&text, Some(&old), None).unwrap(), "before\nafter\n");
     assert_eq!(integration::edit(&text, Some(&old), Some(&old)).unwrap(), text);
     assert!(integration::edit(&text.replace("Glimpse\",", "Edited\","), Some(&old), None).is_err());
-    assert!(integration::edit("-- BEGIN NIXE GLIMPSE\n", Some(&old), None).is_err());
+    assert!(integration::edit("-- BEGIN NYX GLIMPSE\n", Some(&old), None).is_err());
     let (_t, p, _c) = fixture();
     let user = p.state.join("user.lua");
     fs::write(&user, "original\n").unwrap();
@@ -192,7 +192,7 @@ fn integration_preserves_edits_and_rejects_tampering() {
 #[test]
 fn settings_pages_parse_in_both_real_hosts() {
     let (_t, p, _) = fixture();
-    let value = nixe_glimpse::settings::describe(&p, "glimpse").unwrap();
+    let value = nyx_glimpse::settings::describe(&p, "glimpse").unwrap();
     let titles: Vec<_> = value["groups"].as_array().unwrap().iter().map(|g| g["title"].as_str().unwrap()).collect();
     assert_eq!(titles, ["General", "Shortcuts", "Sources", "Local AI", "Plugins", "Appearance"]);
     // Only long groups collapse; short ones stay open.
@@ -276,12 +276,12 @@ fn plugin_package_traversal_and_symlinks_rejected() {
 }
 #[test]
 fn capture_host_args_map_tokens() {
-    assert_eq!(plugins::capture_host_args("nixe-capture", "region"), Some("--region"));
-    assert_eq!(plugins::capture_host_args("nixe-capture", "window"), Some("--window"));
-    assert_eq!(plugins::capture_host_args("nixe-capture", "fullscreen"), Some("--fullscreen"));
-    assert_eq!(plugins::capture_host_args("nixe-capture", "scroll"), Some("--scroll"));
-    assert_eq!(plugins::capture_host_args("nixe-capture", "other"), None);
-    assert_eq!(plugins::capture_host_args("nixe-news", "region"), None);
+    assert_eq!(plugins::capture_host_args("nyx-capture", "region"), Some("--region"));
+    assert_eq!(plugins::capture_host_args("nyx-capture", "window"), Some("--window"));
+    assert_eq!(plugins::capture_host_args("nyx-capture", "fullscreen"), Some("--fullscreen"));
+    assert_eq!(plugins::capture_host_args("nyx-capture", "scroll"), Some("--scroll"));
+    assert_eq!(plugins::capture_host_args("nyx-capture", "other"), None);
+    assert_eq!(plugins::capture_host_args("nyx-news", "region"), None);
 }
 #[test]
 fn news_plugin_sees_only_its_library() {
@@ -290,7 +290,7 @@ fn news_plugin_sees_only_its_library() {
     fs::create_dir(&dir).unwrap();
     fs::write(
         dir.join("plugin.toml"),
-        "id='nixe-news'\nname='News'\nversion='1'\napi_version=1\nexec=['python3','main.py']\ncapabilities=['search']\n",
+        "id='nyx-news'\nname='News'\nversion='1'\napi_version=1\nexec=['python3','main.py']\ncapabilities=['search']\n",
     )
     .unwrap();
     fs::write(
@@ -304,17 +304,17 @@ for line in sys.stdin:
   assert not os.path.exists('/home')
   assert not os.path.isdir('/capture-library')
   if os.path.isdir('/news-library'):
-   assert os.environ.get('NIXE_NEWS_DB')=='/news-library/news.sqlite'
+   assert os.environ.get('NYX_NEWS_DB')=='/news-library/news.sqlite'
   else:
-   assert os.environ.get('NIXE_NEWS_DB') is None
+   assert os.environ.get('NYX_NEWS_DB') is None
   print(json.dumps({'id':1,'result':[]}),flush=True)
  elif r['op']=='shutdown':break
 "#,
     )
     .unwrap();
     plugins::install_local(&p, &dir, "local", "", false).unwrap();
-    plugins::enable(&p, "nixe-news", true).unwrap();
-    plugins::call(&p, "nixe-news", "search", "search", json!({"query":"news"})).unwrap();
+    plugins::enable(&p, "nyx-news", true).unwrap();
+    plugins::call(&p, "nyx-news", "search", "search", json!({"query":"news"})).unwrap();
 }
 #[test]
 fn capture_plugin_sees_only_its_library() {
@@ -323,7 +323,7 @@ fn capture_plugin_sees_only_its_library() {
     fs::create_dir(&dir).unwrap();
     fs::write(
         dir.join("plugin.toml"),
-        "id='nixe-capture'\nname='Capture'\nversion='1'\napi_version=1\nexec=['python3','main.py']\ncapabilities=['search']\n",
+        "id='nyx-capture'\nname='Capture'\nversion='1'\napi_version=1\nexec=['python3','main.py']\ncapabilities=['search']\n",
     )
     .unwrap();
     fs::write(
@@ -337,17 +337,17 @@ for line in sys.stdin:
   assert not os.path.exists('/home')
   assert not os.path.isdir('/news-library')
   if os.path.isdir('/capture-library'):
-   assert os.environ.get('NIXE_CAPTURE_DB')=='/capture-library/capture.sqlite'
+   assert os.environ.get('NYX_CAPTURE_DB')=='/capture-library/capture.sqlite'
   else:
-   assert os.environ.get('NIXE_CAPTURE_DB') is None
+   assert os.environ.get('NYX_CAPTURE_DB') is None
   print(json.dumps({'id':1,'result':[]}),flush=True)
  elif r['op']=='shutdown':break
 "#,
     )
     .unwrap();
     plugins::install_local(&p, &dir, "local", "", false).unwrap();
-    plugins::enable(&p, "nixe-capture", true).unwrap();
-    plugins::call(&p, "nixe-capture", "search", "search", json!({"query":"capture"})).unwrap();
+    plugins::enable(&p, "nyx-capture", true).unwrap();
+    plugins::call(&p, "nyx-capture", "search", "search", json!({"query":"capture"})).unwrap();
 }
 #[test]
 fn sandbox_blocks_home_and_network() {
@@ -418,7 +418,7 @@ fn invalid_vectors_and_shortcut_injection_are_rejected() {
 fn settings_edits_persist_and_reject_invalid_values() {
     let (_t, p, _) = fixture();
     let set = |key: &str, value: &str| {
-        nixe_glimpse::settings::dispatch(&p, &["set".into(), "glimpse".into(), key.into(), value.into()])
+        nyx_glimpse::settings::dispatch(&p, &["set".into(), "glimpse".into(), key.into(), value.into()])
     };
     set("search_key", "SUPER + S").unwrap();
     set("menu_key", "SUPER + M").unwrap();
@@ -479,7 +479,7 @@ fn query_modes_and_related_conversions() {
 }
 #[test]
 fn lexical_queries_require_all_terms_and_exact_numbers() {
-    use nixe_glimpse::query;
+    use nyx_glimpse::query;
     let (_t, p, c) = fixture();
     for name in ["report 2.txt", "report 2026.txt", "report final.txt", "draft final.txt", "report final notes.txt"] {
         fs::write(c.roots[0].join(name), "x").unwrap();

@@ -1,7 +1,7 @@
 [package]
-name = "nixe-glimpse"
+name = "nyx-glimpse"
 version = "0.1.0"
-default-run = "nixe-glimpse"
+default-run = "nyx-glimpse"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -9,10 +9,10 @@ repository.workspace = true
 
 [dependencies]
 glimpse-plugin-sdk = { path = "../../crates/glimpse-plugin-sdk" }
-nixe-core = { git = "https://github.com/design-nexus/nixe-core.git", rev = "87682e6c936b6a4f006639b1a1c099e96346c07c" }
-nixe-ui = { git = "https://github.com/design-nexus/nixe-design.git", rev = "b8204de80644e263e32783602f2e0ae393578c9e" }
-nixe-theme = { git = "https://github.com/design-nexus/nixe-design.git", rev = "b8204de80644e263e32783602f2e0ae393578c9e" }
-nixe-passwords-proto = { git = "https://github.com/design-nexus/nixe-passwords.git", rev = "284b0a01d767b510308602b53d6cb3887d38bb68", features = ["client"] }
+nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "52cba5e27a3dd5f00c780f53e423302b4b5f9c9c" }
+nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "938c638951a53f5874a8276d07ac9dcd68b191ad" }
+nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "938c638951a53f5874a8276d07ac9dcd68b191ad" }
+nyx-passwords-proto = { git = "https://github.com/design-nexus/nyx-passwords.git", rev = "f30ea2887724df67870a066228e737cf278f33a0", features = ["client"] }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_18"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

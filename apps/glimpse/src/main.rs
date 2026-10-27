@@ -6,9 +6,12 @@ fn main() -> glib::ExitCode {
     unsafe {
         libc::umask(0o077);
     }
-    nixe_core::app::init(nixe_core::app::App { slug: "nixe-glimpse", name: "Glimpse" });
+    nyx_core::app::init(nyx_core::app::App { slug: "nyx-glimpse", name: "Glimpse" });
+    if let Err(e) = nyx_glimpse::plugins::migrate_nixe(&nyx_glimpse::config::Paths::discover()) {
+        eprintln!("nyx-glimpse: moving plugins from their Nixe names: {e:#}");
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match nixe_glimpse::cli::dispatch(&args) {
+    match nyx_glimpse::cli::dispatch(&args) {
         Ok(true) => return glib::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{e:#}");
@@ -21,7 +24,7 @@ fn main() -> glib::ExitCode {
             std::env::set_var("GSK_RENDERER", "ngl");
         }
     }
-    let id = std::env::var("GLIMPSE_APP_ID").unwrap_or_else(|_| "io.github.design_nexus.nixe.Glimpse".into());
+    let id = std::env::var("GLIMPSE_APP_ID").unwrap_or_else(|_| "io.github.design_nexus.nyx.Glimpse".into());
     let app = gtk::Application::builder().application_id(id).flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE).build();
     app.connect_startup(|_| ui::theme());
     app.connect_command_line(|app, cmd| {

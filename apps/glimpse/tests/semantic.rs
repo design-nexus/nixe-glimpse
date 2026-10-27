@@ -1,4 +1,4 @@
-use nixe_glimpse::{
+use nyx_glimpse::{
     config::{Config, Paths},
     semantic,
 };

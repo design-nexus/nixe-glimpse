@@ -66,7 +66,7 @@ impl Paths {
                 .map(PathBuf::from)
                 .filter(|p| p.is_absolute())
                 .unwrap_or_else(|| home.join(fallback))
-                .join("nixe-glimpse")
+                .join("nyx-glimpse")
         };
         Self {
             config: xdg("XDG_CONFIG_HOME", ".config"),

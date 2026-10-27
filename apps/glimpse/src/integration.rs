@@ -4,19 +4,19 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 use std::{fs, path::Path, process::Command, time::Duration};
-const START: &str = "-- BEGIN NIXE GLIMPSE";
-const END: &str = "-- END NIXE GLIMPSE";
+const START: &str = "-- BEGIN NYX GLIMPSE";
+const END: &str = "-- END NYX GLIMPSE";
 pub fn block(shortcuts: bool) -> String {
     block_keys(shortcuts, "SUPER + SPACE", "CTRL + SPACE")
 }
 pub fn block_keys(shortcuts: bool, search_key: &str, menu_key: &str) -> String {
     let mut s = format!(
-        "{START}\n-- Owned by Glimpse. Remove through Glimpse Settings.\no.window(\"^io\\\\.github\\\\.design_nexus\\\\.nixe\\\\.Glimpse$\", {{ float = true, center = true }})\n"
+        "{START}\n-- Owned by Glimpse. Remove through Glimpse Settings.\no.window(\"^io\\\\.github\\\\.design_nexus\\\\.nyx\\\\.Glimpse$\", {{ float = true, center = true }})\n"
     );
     // Nothing else: the launcher hides itself when it loses focus (`ui::present`), so no
     // focus rule and no global mouse bindings are needed.
     if shortcuts {
-        s.push_str("o.rebind(\"SUPER + SPACE\", \"Glimpse\", { launch = \"nixe-glimpse --toggle\" })\no.rebind(\"CTRL + SPACE\", \"Omarchy menu\", { menu = \"root\" })\n");
+        s.push_str("o.rebind(\"SUPER + SPACE\", \"Glimpse\", { launch = \"nyx-glimpse --toggle\" })\no.rebind(\"CTRL + SPACE\", \"Omarchy menu\", { menu = \"root\" })\n");
     }
     s = s.replace("SUPER + SPACE", search_key).replace("CTRL + SPACE", menu_key);
     s.push_str(END);
@@ -110,15 +110,15 @@ pub fn apply(paths: &Paths, shortcuts: Option<bool>) -> Result<()> {
 fn service_unit(paths: &Paths) -> Result<()> {
     let folder = paths.config.parent().context("XDG config parent")?.join("systemd/user");
     fs::create_dir_all(&folder)?;
-    let bin = std::env::current_exe()?.parent().context("binary directory")?.join("nixe-glimpsed");
+    let bin = std::env::current_exe()?.parent().context("binary directory")?.join("nyx-glimpsed");
     if !bin.exists() {
-        bail!("nixe-glimpsed is not installed next to Glimpse");
+        bail!("nyx-glimpsed is not installed next to Glimpse");
     }
     let escaped = bin.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%");
     let unit = format!(
         "[Unit]\nDescription=Glimpse local search index\nAfter=graphical-session.target\nPartOf=graphical-session.target\n\n[Service]\nExecStart=\"{escaped}\"\nRestart=on-failure\nUMask=0077\nNice=10\n\n[Install]\nWantedBy=default.target\n"
     );
-    fs::write(folder.join("nixe-glimpsed.service"), unit)?;
+    fs::write(folder.join("nyx-glimpsed.service"), unit)?;
     let mut c = Command::new("systemctl");
     c.args(["--user", "daemon-reload"]);
     process::capture(c, vec![], Duration::from_secs(10), 65536)?;
@@ -127,7 +127,7 @@ fn service_unit(paths: &Paths) -> Result<()> {
 pub fn user_service(paths: &Paths, enabled: bool) -> Result<()> {
     service_unit(paths)?;
     let mut c = Command::new("systemctl");
-    c.args(["--user", if enabled { "enable" } else { "disable" }, "--now", "nixe-glimpsed.service"]);
+    c.args(["--user", if enabled { "enable" } else { "disable" }, "--now", "nyx-glimpsed.service"]);
     process::capture(c, vec![], Duration::from_secs(10), 65536)?;
     Ok(())
 }
@@ -135,7 +135,7 @@ pub fn start_indexing(paths: &Paths) -> Result<()> {
     // Starting the indexer does not change whether it starts at login.
     service_unit(paths)?;
     let mut c = Command::new("systemctl");
-    c.args(["--user", "start", "nixe-glimpsed.service"]);
+    c.args(["--user", "start", "nyx-glimpsed.service"]);
     process::capture(c, vec![], Duration::from_secs(10), 65536)?;
     Ok(())
 }

@@ -2,8 +2,8 @@
 Type=Application
 Name=Glimpse
 Comment=Find apps, files, and ideas locally
-Exec=nixe-glimpse
-Icon=io.github.design_nexus.nixe.Glimpse
+Exec=nyx-glimpse
+Icon=io.github.design_nexus.nyx.Glimpse
 Terminal=false
 Categories=Utility;
 Keywords=search;launcher;files;semantic;

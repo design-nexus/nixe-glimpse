@@ -2,7 +2,7 @@
   "application": "glimpse",
   "directory": "glimpse",
   "packages": [
-    "nixe-glimpse"
+    "nyx-glimpse"
   ],
   "manifest": "Cargo.toml",
   "prepare": [],
@@ -13,9 +13,9 @@
       "test",
       "--locked",
       "-p",
-      "nixe-glimpse",
+      "nyx-glimpse",
       "--bin",
-      "nixe-glimpse"
+      "nyx-glimpse"
     ]
   ]
 }

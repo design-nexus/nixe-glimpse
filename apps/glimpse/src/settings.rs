@@ -28,7 +28,7 @@ fn shortcuts_enabled(p: &Paths) -> bool {
     fs::read_to_string(p.state.join("hypr-block.lua")).is_ok_and(|s| s.contains("o.rebind"))
 }
 fn service_enabled() -> bool {
-    Command::new("systemctl").args(["--user", "is-enabled", "nixe-glimpsed.service"]).output().is_ok_and(|o| o.status.success())
+    Command::new("systemctl").args(["--user", "is-enabled", "nyx-glimpsed.service"]).output().is_ok_and(|o| o.status.success())
 }
 pub fn describe(p: &Paths, page: &str) -> Result<Value> {
     // Accept old IDs for an already-open Settings page during an upgrade, but advertise only one page.
@@ -36,9 +36,9 @@ pub fn describe(p: &Paths, page: &str) -> Result<Value> {
         bail!("unknown Settings page");
     }
     let c = p.load()?;
-    let suite_path = p.config.parent().context("config parent")?.join("nixe/theme.toml");
-    let suite: nixe_theme::Suite = fs::read_to_string(&suite_path).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
-    let theme_options: Vec<_> = nixe_theme::all().into_iter().map(|t| (t.id, t.name)).collect();
+    let suite_path = p.config.parent().context("config parent")?.join("nyx/theme.toml");
+    let suite: nyx_theme::Suite = fs::read_to_string(&suite_path).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
+    let theme_options: Vec<_> = nyx_theme::all().into_iter().map(|t| (t.id, t.name)).collect();
     let service_enabled = service_enabled();
     let mut sources = vec![button("add-folder", "Search folders", "Add folder", "")];
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
@@ -70,7 +70,7 @@ pub fn describe(p: &Paths, page: &str) -> Result<Value> {
     if crate::ai_setup::failed(p) {
         ai.push(button("ai-retry", "Setup could not finish", "Retry", ""));
     }
-    let follow = matches!(suite.mode, nixe_theme::ThemeMode::Omarchy);
+    let follow = matches!(suite.mode, nyx_theme::ThemeMode::Omarchy);
     let mut groups = vec![
         group(
             "General",
@@ -109,7 +109,7 @@ pub fn describe(p: &Paths, page: &str) -> Result<Value> {
     Ok(json!({"poll":2,"groups":groups}))
 }
 fn launch(args: &[&str]) -> Result<()> {
-    Command::new(std::env::current_exe()?.with_file_name("nixe-glimpse"))
+    Command::new(std::env::current_exe()?.with_file_name("nyx-glimpse"))
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -124,7 +124,7 @@ fn start_job(p: &Paths, op: &str) -> Result<()> {
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         bail!("Another operation is already running");
     }
-    Command::new(std::env::current_exe()?.with_file_name("nixe-glimpse-settings"))
+    Command::new(std::env::current_exe()?.with_file_name("nyx-glimpse-settings"))
         .args(["run-job", op])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -220,8 +220,8 @@ pub fn dispatch(p: &Paths, args: &[String]) -> Result<()> {
                     p.save(&c)?;
                 }
                 "mode" | "theme" | "follow_omarchy" => {
-                    let file = p.config.parent().context("config parent")?.join("nixe/theme.toml");
-                    let mut suite: nixe_theme::Suite =
+                    let file = p.config.parent().context("config parent")?.join("nyx/theme.toml");
+                    let mut suite: nyx_theme::Suite =
                         fs::read_to_string(&file).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
                     if key == "mode" || key == "follow_omarchy" {
                         let value = if key == "follow_omarchy" {
@@ -230,14 +230,14 @@ pub fn dispatch(p: &Paths, args: &[String]) -> Result<()> {
                             value
                         };
                         suite.mode = match value {
-                            "omarchy" => nixe_theme::ThemeMode::Omarchy,
-                            "theme" => nixe_theme::ThemeMode::Theme,
+                            "omarchy" => nyx_theme::ThemeMode::Omarchy,
+                            "theme" => nyx_theme::ThemeMode::Theme,
                             _ => bail!("Unknown theme source"),
                         };
                         c.mode = value.into();
                     } else {
-                        if !nixe_theme::all().iter().any(|t| t.id == value) {
-                            bail!("Unknown Nixe theme");
+                        if !nyx_theme::all().iter().any(|t| t.id == value) {
+                            bail!("Unknown Nyx theme");
                         }
                         suite.theme = value.into();
                         c.theme = value.into();

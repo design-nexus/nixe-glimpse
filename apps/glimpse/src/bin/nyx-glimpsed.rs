@@ -1,15 +1,15 @@
-use nixe_glimpse::{
+use notify::{RecursiveMode, Watcher};
+use nyx_glimpse::{
     config::{Paths, atomic_write},
     index, semantic,
 };
-use notify::{RecursiveMode, Watcher};
 use std::{
     fs,
     os::fd::AsRawFd,
     sync::mpsc,
     time::{Duration, Instant},
 };
-fn gated(c: &nixe_glimpse::config::Config) -> bool {
+fn gated(c: &nyx_glimpse::config::Config) -> bool {
     if c.battery_pause
         && fs::read_dir("/sys/class/power_supply").is_ok_and(|entries| {
             entries.flatten().any(|e| fs::read_to_string(e.path().join("status")).is_ok_and(|s| s.trim() == "Discharging"))
@@ -27,8 +27,11 @@ fn gated(c: &nixe_glimpse::config::Config) -> bool {
     })
 }
 fn run() -> anyhow::Result<()> {
+    // Moves the folders from their Nixe names before anything creates new ones.
+    nyx_core::app::init(nyx_core::app::App { slug: "nyx-glimpse", name: "Glimpse" });
     let p = Paths::discover();
     p.ensure()?;
+    nyx_glimpse::plugins::migrate_nixe(&p)?;
     let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(p.state.join("daemon.lock"))?;
     // SAFETY: valid owned file descriptor, held for the process lifetime.
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {

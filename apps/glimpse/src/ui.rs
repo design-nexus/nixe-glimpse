@@ -1,7 +1,7 @@
 use crate::player::Player;
 use gtk::{gdk, gio, glib, prelude::*};
 use crate::pw;
-use nixe_glimpse::{
+use nyx_glimpse::{
     config::{self, Paths},
     index, passwords, plugins, query, semantic, utility,
 };
@@ -32,7 +32,7 @@ enum Action {
     Copy(String),
     System(&'static str),
     Plugin(String, String, plugins::Action),
-    /// A Nixe Passwords row (`pw …`): an item's id and metadata, never a secret.
+    /// A Nyx Passwords row (`pw …`): an item's id and metadata, never a secret.
     Password(pw::Pw),
 }
 #[derive(Clone)]
@@ -122,7 +122,7 @@ struct Reply {
     status: String,
 }
 pub fn theme() {
-    nixe_theme::install(nixe_theme::Style {
+    nyx_theme::install(nyx_theme::Style {
         window_class: "glimpse-window",
         base_skip: &[],
         css: include_str!("style.css"),
@@ -130,8 +130,8 @@ pub fn theme() {
         extra_colors: None,
         prefs: || {
             let c = Paths::discover().load().unwrap_or_default();
-            nixe_theme::ThemePrefs {
-                mode: if c.mode == "theme" { nixe_theme::ThemeMode::Theme } else { nixe_theme::ThemeMode::Omarchy },
+            nyx_theme::ThemePrefs {
+                mode: if c.mode == "theme" { nyx_theme::ThemeMode::Theme } else { nyx_theme::ThemeMode::Omarchy },
                 theme: c.theme,
                 glow: false,
                 reduce_motion: true,
@@ -140,7 +140,7 @@ pub fn theme() {
         set_theme: Some(|mode, theme| {
             let p = Paths::discover();
             if let Ok(mut c) = p.load() {
-                c.mode = if mode == nixe_theme::ThemeMode::Theme { "theme" } else { "omarchy" }.into();
+                c.mode = if mode == nyx_theme::ThemeMode::Theme { "theme" } else { "omarchy" }.into();
                 c.theme = theme;
                 let _ = p.save(&c);
             }
@@ -152,7 +152,7 @@ fn status_error(label: &gtk::Label, e: impl std::fmt::Display) {
 }
 thread_local! {static SEARCH:RefCell<Option<gtk::SearchEntry>>=const{RefCell::new(None)};}
 pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
-    let _ = nixe_glimpse::ai_setup::resume(&Paths::discover());
+    let _ = nyx_glimpse::ai_setup::resume(&Paths::discover());
     if let Some(win) = PANEL.with(|p| p.borrow().clone()) {
         if toggle && win.is_visible() && win.is_mapped() {
             win.set_visible(false);
@@ -248,13 +248,13 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     status_bar.append(&count);
     let app_clone = app.clone();
     status_bar
-        .append(&nixe_ui::chrome::status_action("folder-new-symbolic", "Add a folder to search", move || add_folder(&app_clone)));
+        .append(&nyx_ui::chrome::status_action("folder-new-symbolic", "Add a folder to search", move || add_folder(&app_clone)));
     let app_clone = app.clone();
     status_bar
-        .append(&nixe_ui::chrome::status_action("application-x-addon-symbolic", "Plugins", move || plugin_manager(&app_clone)));
-    status_bar.append(&nixe_ui::chrome::gear(|| {
+        .append(&nyx_ui::chrome::status_action("application-x-addon-symbolic", "Plugins", move || plugin_manager(&app_clone)));
+    status_bar.append(&nyx_ui::chrome::gear(|| {
         dismiss();
-        let _ = Command::new("nixe-settings").args(["--section", "glimpse"]).spawn();
+        let _ = Command::new("nyx-settings").args(["--section", "glimpse"]).spawn();
     }));
     status_bar.set_visible(false);
     main.append(&status_bar);
@@ -1145,7 +1145,7 @@ fn show_empty(slot: &gtk::Box, query: &str) {
     while let Some(child) = slot.first_child() {
         slot.remove(&child);
     }
-    slot.append(&nixe_ui::widgets::empty_state(
+    slot.append(&nyx_ui::widgets::empty_state(
         "system-search-symbolic",
         &format!("No results for “{query}”"),
         "Try fewer or different words, or add a folder to search.",
@@ -1176,7 +1176,7 @@ fn set_hints(hints: &gtk::Box, action: Option<&Action>) {
     };
     for (keys, label) in list {
         let hint = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        hint.append(&nixe_ui::widgets::key_caps(keys));
+        hint.append(&nyx_ui::widgets::key_caps(keys));
         hint.append(&gtk::Label::new(Some(label)));
         hints.append(&hint);
     }
@@ -1225,7 +1225,7 @@ fn result_row(result: &ResultRow) -> gtk::ListBoxRow {
     }
     line.append(&text);
     if !result.reason.is_empty() {
-        line.append(&nixe_ui::widgets::tag(&result.reason, if result.reason == "Related" { "" } else { "accent" }));
+        line.append(&nyx_ui::widgets::tag(&result.reason, if result.reason == "Related" { "" } else { "accent" }));
     }
     let row = gtk::ListBoxRow::new();
     row.add_css_class(if result.folder.is_empty() { "single" } else { "double" });
@@ -1386,7 +1386,7 @@ fn when(time: std::time::SystemTime) -> String {
     at.format(format).map(|s| s.to_string()).unwrap_or_default()
 }
 fn capture_image(cmd: Command) -> Option<Vec<u8>> {
-    nixe_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 6 * 1024 * 1024).ok().filter(|b| !b.is_empty())
+    nyx_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 6 * 1024 * 1024).ok().filter(|b| !b.is_empty())
 }
 fn file_body(path: &Path, hit: &Value, query: &str, details: &mut Vec<(String, String)>) -> Body {
     let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
@@ -1433,7 +1433,7 @@ fn file_body(path: &Path, hit: &Value, query: &str, details: &mut Vec<(String, S
         }
         let mut cmd = Command::new("pdftotext");
         cmd.args(["-f", &page, "-l", &page, "--"]).arg(path).arg("-");
-        if let Ok(bytes) = nixe_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 65536) {
+        if let Ok(bytes) = nyx_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 65536) {
             return text_body(&String::from_utf8_lossy(&bytes), path, hit, query);
         }
         return Body::Icon;
@@ -1465,7 +1465,7 @@ fn file_body(path: &Path, hit: &Value, query: &str, details: &mut Vec<(String, S
         };
         let mut cmd = Command::new("unzip");
         cmd.arg("-p").arg(path).arg(member);
-        if let Ok(bytes) = nixe_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 2 * 1024 * 1024) {
+        if let Ok(bytes) = nyx_glimpse::process::capture(cmd, vec![], Duration::from_secs(3), 2 * 1024 * 1024) {
             let text = semantic::strip_markup(&String::from_utf8_lossy(&bytes));
             // Office XML has no line breaks worth keeping; collapse the runs of spaces.
             let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1508,7 +1508,7 @@ fn text_body(text: &str, path: &Path, hit: &Value, query: &str) -> Body {
 fn media_length(path: &Path) -> Option<f64> {
     let mut probe = Command::new("ffprobe");
     probe.args(["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"]).arg(path);
-    let bytes = nixe_glimpse::process::capture(probe, vec![], Duration::from_secs(2), 256).ok()?;
+    let bytes = nyx_glimpse::process::capture(probe, vec![], Duration::from_secs(2), 256).ok()?;
     String::from_utf8_lossy(&bytes).trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.)
 }
 fn activate(
@@ -1527,7 +1527,7 @@ fn activate(
             }
             return;
         }
-        if let Some(done) = nixe_glimpse::pim::host_action(&Paths::discover(), id, token) {
+        if let Some(done) = nyx_glimpse::pim::host_action(&Paths::discover(), id, token) {
             match done {
                 Ok(()) => window.set_visible(false),
                 Err(e) => status_error(status, e),
@@ -1656,8 +1656,8 @@ fn open_file(path: &Path, hit: &Value, reveal: bool) -> anyhow::Result<()> {
         let mut special: Option<Command> = None;
         if content_type == "application/pdf" {
             special = match id.as_str() {
-                "io.github.design_nexus.nixe.Pdf.desktop" => {
-                    let mut c = Command::new("nixe-pdf");
+                "io.github.design_nexus.nyx.Pdf.desktop" => {
+                    let mut c = Command::new("nyx-pdf");
                     c.args(["--page", &page.to_string()]);
                     Some(c)
                 }
@@ -1809,7 +1809,7 @@ pub fn add_folder(app: &gtk::Application) {
         {
             parent.present();
             run_task(label, move || {
-                nixe_glimpse::cli::dispatch(&["sources".into(), "add".into(), path.display().to_string()])?;
+                nyx_glimpse::cli::dispatch(&["sources".into(), "add".into(), path.display().to_string()])?;
                 Ok("Folder added. Background indexing is enabled.".into())
             });
         } else {
@@ -1994,7 +1994,7 @@ fn rebuild_plugin_manager(app: &gtk::Application, win: &gtk::ApplicationWindow) 
                 };
                 // Removing deletes the package, so it takes the suite's two clicks.
                 let button = if op == "remove" {
-                    nixe_ui::widgets::two_click(label, "Click again to remove", run)
+                    nyx_ui::widgets::two_click(label, "Click again to remove", run)
                 } else {
                     let button = gtk::Button::with_label(label);
                     button.connect_clicked(move |_| run());
@@ -2191,7 +2191,7 @@ fn plugin_settings(app: &gtk::Application, id: &str) {
                                 root.append(&gtk::Label::new(Some(title)));
                                 continue;
                             };
-                            root.append(&nixe_ui::widgets::row(title, description, Some(&control)));
+                            root.append(&nyx_ui::widgets::row(title, description, Some(&control)));
                             let button = gtk::Button::with_label(&format!("Save {title}"));
                             let id = id.clone();
                             let key = key.to_owned();
@@ -2252,7 +2252,7 @@ fn media_kind(path: &Path) -> Option<bool> {
         None
     }
 }
-/// Syntax colours drawn from the Nixe palette rather than a fixed editor theme, so code
+/// Syntax colours drawn from the Nyx palette rather than a fixed editor theme, so code
 /// previews match every theme: the accent for structure, dim italics for comments.
 fn code_markup(code: &str, path: &Path) -> Option<String> {
     use std::{str::FromStr, sync::OnceLock};
@@ -2268,7 +2268,7 @@ fn code_markup(code: &str, path: &Path) -> Option<String> {
     if syntax.name == "Plain Text" {
         return None;
     }
-    let palette = nixe_theme::current_palette();
+    let palette = nyx_theme::current_palette();
     let color = |hex: &str| {
         let v = u32::from_str_radix(hex.trim_start_matches('#').get(..6)?, 16).ok()?;
         Some(Color { r: (v >> 16) as u8, g: (v >> 8) as u8, b: v as u8, a: 255 })
