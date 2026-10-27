@@ -10,11 +10,9 @@ pub fn block(shortcuts: bool) -> String {
     block_keys(shortcuts, "SUPER + SPACE", "CTRL + SPACE")
 }
 pub fn block_keys(shortcuts: bool, search_key: &str, menu_key: &str) -> String {
-    let mut s = format!(
-        "{START}\n-- Owned by Glimpse. Remove through Glimpse Settings.\no.window(\"^io\\\\.github\\\\.design_nexus\\\\.nyx\\\\.Glimpse$\", {{ float = true, center = true }})\n"
-    );
-    // Nothing else: the launcher hides itself when it loses focus (`ui::present`), so no
-    // focus rule and no global mouse bindings are needed.
+    let mut s = format!("{START}\n-- Owned by Glimpse. Remove through Glimpse Settings.\n");
+    // Nothing else: the launcher is a layer-shell overlay that places itself and hides on a
+    // click beside its panel (`ui::present`), so no window rule and no mouse bindings are needed.
     if shortcuts {
         s.push_str("o.rebind(\"SUPER + SPACE\", \"Glimpse\", { launch = \"nyx-glimpse --toggle\" })\no.rebind(\"CTRL + SPACE\", \"Omarchy menu\", { menu = \"root\" })\n");
     }

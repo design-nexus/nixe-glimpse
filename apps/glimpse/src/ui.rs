@@ -1,5 +1,6 @@
 use crate::player::Player;
 use gtk::{gdk, gio, glib, prelude::*};
+use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use crate::pw;
 use nyx_glimpse::{
     config::{self, Paths},
@@ -7,7 +8,7 @@ use nyx_glimpse::{
 };
 use serde_json::{Value, json};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     io::Read,
     path::{Path, PathBuf},
     process::Command,
@@ -172,8 +173,23 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         .resizable(false)
         .build();
     window.add_css_class("glimpse-window");
+    window.add_css_class("glimpse-launcher");
+    // A transparent overlay over the whole monitor: the pointer never leaves Glimpse, so
+    // focus-follows-mouse can't take the keyboard, and a click beside the panel dismisses it.
+    if gtk4_layer_shell::is_supported() {
+        window.init_layer_shell();
+        // A non-resizable window would size the surface to its content instead of the monitor.
+        window.set_resizable(true);
+        window.set_layer(Layer::Overlay);
+        for edge in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
+            window.set_anchor(edge, true);
+        }
+        window.set_keyboard_mode(KeyboardMode::Exclusive);
+        window.set_namespace(Some("glimpse"));
+    }
     let main = gtk::Box::new(gtk::Orientation::Vertical, 0);
     main.add_css_class("glimpse-frame");
+    main.set_size_request(WIDTH, COLLAPSED);
     let search_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     search_bar.add_css_class("search-bar");
     let entry =
@@ -258,7 +274,25 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     }));
     status_bar.set_visible(false);
     main.append(&status_bar);
-    window.set_child(Some(&main));
+    // A fixed container gives the panel its requested size rather than its content's natural one.
+    let backdrop = gtk::Fixed::new();
+    backdrop.put(&main, 0., 0.);
+    window.set_child(Some(&backdrop));
+    let overlay_size = Rc::new(Cell::new((0, 0)));
+    let panel_layout = main.clone();
+    let size_layout = overlay_size.clone();
+    window.connect_realize(move |w| {
+        if let Some(surface) = w.surface() {
+            let panel = panel_layout.clone();
+            let size = size_layout.clone();
+            // Moving the panel lays the surface out again; only a new size needs a new spot.
+            surface.connect_layout(move |_, width, height| {
+                if size.replace((width, height)) != (width, height) {
+                    place_panel(&panel, (width, height));
+                }
+            });
+        }
+    });
     let armed = Rc::new(RefCell::new(None::<String>));
     let rows: Rc<RefCell<Vec<ResultRow>>> = Rc::new(RefCell::new(Vec::new()));
     let header_rows = rows.clone();
@@ -630,7 +664,8 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     let status_entry = status_bar.clone();
     let pane_entry = pane.clone();
     let playback_entry = playback.clone();
-    let window_entry = window.clone();
+    let panel_entry = main.clone();
+    let size_entry = overlay_size.clone();
     let list_entry = list.clone();
     let rows_entry = rows.clone();
     let browsing_entry = browsing.clone();
@@ -658,7 +693,8 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         }
         status_entry.set_visible(expanded);
         pane_entry.root.set_visible(Paths::discover().load().is_ok_and(|c| c.preview));
-        window_entry.set_default_size(WIDTH, if expanded { EXPANDED } else { COLLAPSED });
+        panel_entry.set_size_request(WIDTH, if expanded { EXPANDED } else { COLLAPSED });
+        place_panel(&panel_entry, size_entry.get());
         while let Some(child) = list_entry.first_child() {
             list_entry.remove(&child);
         }
@@ -941,12 +977,20 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         w.set_visible(false);
         glib::Propagation::Stop
     });
-    // A click elsewhere, or another window taking the keyboard, puts the launcher away.
-    window.connect_is_active_notify(|w| {
-        if !w.is_active() && w.is_visible() {
-            w.set_visible(false);
+    // A click beside the panel puts the launcher away; moving the pointer off it does not.
+    let outside = gtk::GestureClick::new();
+    outside.set_button(0);
+    let window_outside = window.clone();
+    let panel_outside = main.clone();
+    outside.connect_pressed(move |_, _, x, y| {
+        let inside = panel_outside
+            .compute_bounds(&window_outside)
+            .is_some_and(|b| b.contains_point(&gtk::graphene::Point::new(x as f32, y as f32)));
+        if !inside {
+            window_outside.set_visible(false);
         }
     });
+    window.add_controller(outside);
     PANEL.with(|p| *p.borrow_mut() = Some(window.clone()));
     window.present();
     focus_search(&window, &entry);
@@ -954,6 +998,16 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
     if let Some(query) = query {
         entry.set_text(query);
     }
+}
+/// Places the panel in the launcher's overlay at its requested size: centred across, with
+/// the collapsed search bar at mid-height so results grow downwards from it.
+fn place_panel(panel: &gtk::Box, (width, height): (i32, i32)) {
+    let Some(backdrop) = panel.parent().and_downcast::<gtk::Fixed>() else { return };
+    let w = panel.measure(gtk::Orientation::Horizontal, -1).0;
+    let h = panel.measure(gtk::Orientation::Vertical, w).0;
+    let x = ((width - w) / 2).max(0);
+    let y = ((height - COLLAPSED) / 2).clamp(0, (height - h).max(0));
+    backdrop.move_(panel, x as f64, y as f64);
 }
 /// The right-hand pane: a framed content area, then a list of details. Every kind of
 /// result uses the same layout, so moving through results never reshuffles the pane.

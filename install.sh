@@ -27,7 +27,7 @@ app_info() {
   dir=$1 pkg="nyx-$1" bins="nyx-$1" deps="" ids="" old_bins="" old_desktops="" old_icons="" defaults=false
   case $1 in
     settings) ids="Settings" old_bins="settings settings-helper"; bins="nyx-settings nyx-settings-helper nyx-goa-helper" ;;
-    glimpse) ids="Glimpse" bins="nyx-glimpse nyx-glimpsed nyx-glimpse-settings" deps="bubblewrap" ;;
+    glimpse) ids="Glimpse" bins="nyx-glimpse nyx-glimpsed nyx-glimpse-settings" deps="bubblewrap gtk4-layer-shell" ;;
     contacts) ids="Contacts" defaults=true ;;
     git) ids="Git" deps="gtksourceview5 libsecret git-lfs" ;;
     passwords) ids="Passwords" bins="nyx-passwords nyx-passwordsd nyx-passwords-settings nyx-passwords-bridge nyx-passwords-assistant" deps="libsecret librsvg zip" ;;

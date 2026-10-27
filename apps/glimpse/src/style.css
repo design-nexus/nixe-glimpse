@@ -9,6 +9,17 @@ window.glimpse-window {
   border: 1px solid @hairline;
 }
 
+/* The launcher is a see-through overlay over the whole monitor; only its panel is drawn. */
+window.glimpse-window.glimpse-launcher {
+  background: transparent;
+  border: none;
+}
+
+window.glimpse-window.glimpse-launcher .glimpse-frame {
+  background: @theme_bg;
+  border: 1px solid @hairline;
+}
+
 /* ---------- Search bar ---------- */
 
 .search-bar {
