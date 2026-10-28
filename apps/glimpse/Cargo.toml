@@ -10,8 +10,8 @@ repository.workspace = true
 [dependencies]
 glimpse-plugin-sdk = { path = "../../crates/glimpse-plugin-sdk" }
 nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "52cba5e27a3dd5f00c780f53e423302b4b5f9c9c" }
-nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "938c638951a53f5874a8276d07ac9dcd68b191ad" }
-nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "938c638951a53f5874a8276d07ac9dcd68b191ad" }
+nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "144e77df1b6561fd8d0667e0d58306696c3e4d63" }
+nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "144e77df1b6561fd8d0667e0d58306696c3e4d63" }
 nyx-passwords-proto = { git = "https://github.com/design-nexus/nyx-passwords.git", rev = "f30ea2887724df67870a066228e737cf278f33a0", features = ["client"] }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_18"] }
 gtk4-layer-shell = "0.8"

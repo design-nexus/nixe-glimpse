@@ -123,6 +123,7 @@ struct Reply {
     status: String,
 }
 pub fn theme() {
+    nyx_theme::use_design_2();
     nyx_theme::install(nyx_theme::Style {
         window_class: "glimpse-window",
         base_skip: &[],
@@ -147,6 +148,14 @@ pub fn theme() {
             }
         }),
     });
+}
+/// The output named by `GLIMPSE_MONITOR`, for layout checks on a virtual monitor.
+fn test_monitor() -> Option<gtk::gdk::Monitor> {
+    let name = std::env::var("GLIMPSE_MONITOR").ok()?;
+    let monitors = gtk::gdk::Display::default()?.monitors();
+    (0..monitors.n_items())
+        .filter_map(|i| monitors.item(i).and_downcast::<gtk::gdk::Monitor>())
+        .find(|m| m.connector().is_some_and(|c| c == name))
 }
 fn status_error(label: &gtk::Label, e: impl std::fmt::Display) {
     label.set_text(&e.to_string());
@@ -184,8 +193,16 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
         for edge in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
             window.set_anchor(edge, true);
         }
-        window.set_keyboard_mode(KeyboardMode::Exclusive);
         window.set_namespace(Some("glimpse"));
+        match test_monitor() {
+            // A test copy (GLIMPSE_MONITOR=<connector>) stays on that output and never
+            // takes the keyboard from the real session.
+            Some(monitor) => {
+                window.set_monitor(Some(&monitor));
+                window.set_keyboard_mode(KeyboardMode::None);
+            }
+            None => window.set_keyboard_mode(KeyboardMode::Exclusive),
+        }
     }
     let main = gtk::Box::new(gtk::Orientation::Vertical, 0);
     main.add_css_class("glimpse-frame");
@@ -776,18 +793,12 @@ pub fn present(app: &gtk::Application, toggle: bool, query: Option<&str>) {
             Action::App(id) => {
                 let app = APPS.with(|apps| apps.borrow().get(id).cloned());
                 let description = app.as_ref().and_then(|a| a.description()).map(|d| d.to_string()).unwrap_or_default();
-                pane.card(&icon, "", &description, false);
-                pane.add_detail("Kind", "Application");
-                if let Some(command) = app.and_then(|a| a.commandline()) {
-                    // Drop the desktop-entry field codes (%U, %f, …) from the command shown.
-                    let command = command
-                        .to_string_lossy()
-                        .split_whitespace()
-                        .filter(|w| !w.starts_with('%'))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    pane.add_detail("Command", &command);
-                }
+                // Drop the desktop-entry field codes (%U, %f, …) from the command shown.
+                let command = app
+                    .and_then(|a| a.commandline())
+                    .map(|c| c.to_string_lossy().split_whitespace().filter(|w| !w.starts_with('%')).collect::<Vec<_>>().join(" "))
+                    .unwrap_or_default();
+                pane.app_card(&icon, &result.title, &description, &command, &app_facts(id));
                 return;
             }
             Action::Copy(value) => {
@@ -1022,6 +1033,7 @@ struct PreviewPane {
     card_icon: gtk::Image,
     card_title: gtk::Label,
     card_desc: gtk::Label,
+    app: gtk::Box,
     details: gtk::Grid,
     detail_rows: Rc<std::cell::Cell<i32>>,
     calculator: gtk::Box,
@@ -1076,6 +1088,9 @@ impl PreviewPane {
         card_desc.add_css_class("preview-card-desc");
         card.append(&card_desc);
         frame.add_named(&card, Some("card"));
+        let app = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        app.add_css_class("app-card");
+        frame.add_named(&app, Some("app"));
         let details = gtk::Grid::builder().row_spacing(6).column_spacing(18).build();
         details.add_css_class("preview-details");
         let (calculator, display) = calculator_preview(entry);
@@ -1094,6 +1109,7 @@ impl PreviewPane {
             card_icon,
             card_title,
             card_desc,
+            app,
             details,
             detail_rows: Rc::new(std::cell::Cell::new(0)),
             calculator,
@@ -1115,6 +1131,75 @@ impl PreviewPane {
         self.card_desc.set_text(desc);
         self.card_desc.set_visible(!desc.is_empty());
         self.frame.set_visible_child_name("card");
+    }
+    /// An app: its icon, name and kind, what it does, its categories, then the facts.
+    fn app_card(&self, icon: &gio::Icon, name: &str, description: &str, command: &str, facts: &AppFacts) {
+        while let Some(child) = self.app.first_child() {
+            self.app.remove(&child);
+        }
+        let head = gtk::Box::new(gtk::Orientation::Horizontal, 16);
+        let image = gtk::Image::from_gicon(icon);
+        image.set_pixel_size(64);
+        image.add_css_class("app-card-icon");
+        head.append(&image);
+        let titles = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        titles.set_valign(gtk::Align::Center);
+        titles.set_hexpand(true);
+        let title = gtk::Label::new(Some(name));
+        title.add_css_class("app-card-name");
+        title.set_xalign(0.);
+        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        titles.append(&title);
+        let kind = if facts.kind.is_empty() { "Application" } else { facts.kind.as_str() };
+        let kind = gtk::Label::new(Some(kind));
+        kind.add_css_class("app-card-kind");
+        kind.set_xalign(0.);
+        kind.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        titles.append(&kind);
+        head.append(&titles);
+        self.app.append(&head);
+        if !description.is_empty() {
+            let desc = gtk::Label::new(Some(description));
+            desc.add_css_class("app-card-desc");
+            desc.set_xalign(0.);
+            desc.set_wrap(true);
+            desc.set_max_width_chars(60);
+            self.app.append(&desc);
+        }
+        if !facts.categories.is_empty() {
+            let chips = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            chips.add_css_class("app-card-chips");
+            for c in &facts.categories {
+                chips.append(&nyx_ui::widgets::label(c, "app-chip"));
+            }
+            self.app.append(&chips);
+        }
+        let info = gtk::Grid::builder().row_spacing(8).column_spacing(18).build();
+        info.add_css_class("app-card-info");
+        let mut row = 0;
+        for (key, value) in [("Command", command), ("Source", facts.source), ("Keywords", facts.keywords.as_str())] {
+            if value.is_empty() {
+                continue;
+            }
+            let k = gtk::Label::new(Some(key));
+            k.add_css_class("detail-key");
+            k.set_xalign(0.);
+            k.set_valign(gtk::Align::Start);
+            let v = gtk::Label::new(Some(value));
+            v.add_css_class(if key == "Command" { "app-card-command" } else { "detail-value" });
+            v.set_xalign(0.);
+            v.set_hexpand(true);
+            v.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            v.set_tooltip_text(Some(value));
+            info.attach(&k, 0, row, 1, 1);
+            info.attach(&v, 1, row, 1, 1);
+            row += 1;
+        }
+        let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        spacer.set_vexpand(true);
+        self.app.append(&spacer);
+        self.app.append(&info);
+        self.frame.set_visible_child_name("app");
     }
     fn text(&self, markup: &str) {
         self.text.set_markup(markup);
@@ -1230,8 +1315,13 @@ fn set_hints(hints: &gtk::Box, action: Option<&Action>) {
     };
     for (keys, label) in list {
         let hint = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        hint.append(&nyx_ui::widgets::key_caps(keys));
-        hint.append(&gtk::Label::new(Some(label)));
+        let caps = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        caps.set_valign(gtk::Align::Center);
+        for key in keys {
+            caps.append(&nyx_ui::widgets::label(key, "hint-key"));
+        }
+        hint.append(&caps);
+        hint.append(&nyx_ui::widgets::label(label, "hint-label"));
         hints.append(&hint);
     }
 }
@@ -1817,6 +1907,10 @@ fn close_controls(window: &gtk::ApplicationWindow, root: &gtk::Box) {
         }
     });
     root.append(&close);
+    escape_closes(window);
+}
+/// Esc closes the window.
+fn escape_closes(window: &gtk::ApplicationWindow) {
     if window.has_css_class("escape-close") {
         return;
     }
@@ -1890,7 +1984,8 @@ pub fn add_plugin(app: &gtk::Application) {
         }
     });
 }
-fn app_keywords(id: &str) -> String {
+/// The desktop entry for app `id`: where it was found, and its contents.
+fn desktop_entry(id: &str) -> Option<(PathBuf, glib::KeyFile)> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share"));
@@ -1898,38 +1993,165 @@ fn app_keywords(id: &str) -> String {
     dirs.extend(std::env::split_paths(
         &std::env::var_os("XDG_DATA_DIRS").unwrap_or_else(|| "/usr/local/share:/usr/share".into()),
     ));
-    for dir in dirs {
+    dirs.into_iter().find_map(|dir| {
+        let path = dir.join("applications").join(id);
         let key = glib::KeyFile::new();
-        if key.load_from_file(dir.join("applications").join(id), glib::KeyFileFlags::NONE).is_ok() {
-            return key
-                .string_list("Desktop Entry", "Keywords")
-                .map(|v| v.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(" "))
-                .unwrap_or_default();
-        }
-    }
-    String::new()
+        key.load_from_file(&path, glib::KeyFileFlags::NONE).ok().map(|_| (path, key))
+    })
+}
+fn app_keywords(id: &str) -> String {
+    desktop_entry(id)
+        .and_then(|(_, key)| key.string_list("Desktop Entry", "Keywords").ok())
+        .map(|v| v.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(" "))
+        .unwrap_or_default()
+}
+/// What an app card shows beyond the name and description.
+struct AppFacts {
+    kind: String,
+    categories: Vec<&'static str>,
+    keywords: String,
+    source: &'static str,
+}
+fn app_facts(id: &str) -> AppFacts {
+    let Some((path, key)) = desktop_entry(id) else {
+        return AppFacts { kind: String::new(), categories: Vec::new(), keywords: String::new(), source: "" };
+    };
+    let kind = key.locale_string("Desktop Entry", "GenericName", None).map(|s| s.to_string()).unwrap_or_default();
+    let listed: Vec<String> =
+        key.string_list("Desktop Entry", "Categories").map(|v| v.iter().map(|s| s.to_string()).collect()).unwrap_or_default();
+    // The freedesktop categories people recognise, in plain words; the rest are skipped.
+    const NAMES: &[(&str, &str)] = &[
+        ("AudioVideo", "Media"),
+        ("Audio", "Audio"),
+        ("Video", "Video"),
+        ("Development", "Development"),
+        ("Education", "Education"),
+        ("Game", "Games"),
+        ("Graphics", "Graphics"),
+        ("Network", "Internet"),
+        ("Office", "Office"),
+        ("Science", "Science"),
+        ("Settings", "Settings"),
+        ("System", "System"),
+        ("Utility", "Utilities"),
+        ("FileManager", "File manager"),
+        ("TerminalEmulator", "Terminal"),
+        ("WebBrowser", "Web browser"),
+        ("TextEditor", "Text editor"),
+        ("IDE", "IDE"),
+        ("Email", "Email"),
+        ("Chat", "Chat"),
+        ("Player", "Player"),
+    ];
+    let mut categories: Vec<&'static str> =
+        listed.iter().filter_map(|c| NAMES.iter().find(|(k, _)| k == c).map(|(_, v)| *v)).collect();
+    categories.dedup();
+    categories.truncate(4);
+    let keywords = key
+        .locale_string_list("Desktop Entry", "Keywords", None)
+        .map(|v| v.iter().map(|s| s.to_string()).filter(|s| !s.is_empty()).take(6).collect::<Vec<_>>().join(", "))
+        .unwrap_or_default();
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let shown = path.to_string_lossy();
+    let source = if shown.contains("/flatpak/") {
+        "Flatpak"
+    } else if !home.as_os_str().is_empty() && path.starts_with(&home) {
+        "Installed for you"
+    } else {
+        "System"
+    };
+    AppFacts { kind, categories, keywords, source }
+}
+thread_local! {
+    /// The plugin window's open tab ("installed" or "browse"), kept across rebuilds.
+    static PLUGIN_TAB: RefCell<String> = RefCell::new("installed".into());
 }
 pub fn plugin_manager(app: &gtk::Application) {
     dismiss();
+    if let Some(win) = app.windows().into_iter().find(|w| w.has_css_class("plugins-window")) {
+        win.present();
+        return;
+    }
+    // A fixed size: Hyprland floats it like a dialog instead of tiling it.
     let win = gtk::ApplicationWindow::builder()
         .application(app)
         .title("Glimpse · Plugins")
-        .default_width(800)
-        .default_height(580)
+        .default_width(720)
+        .default_height(560)
+        .resizable(false)
         .build();
     win.add_css_class("glimpse-window");
-    rebuild_plugin_manager(app, &win);
+    win.add_css_class("plugins-window");
+    win.set_titlebar(Some(&gtk::Box::new(gtk::Orientation::Horizontal, 0)));
+    escape_closes(&win);
+
+    let header = nyx_ui::chrome::app_header(&win, "application-x-addon-symbolic", "Glimpse");
+    header.set_subtitle("Plugins");
+    let pages = gtk::Stack::new();
+    pages.set_vexpand(true);
+    pages.set_transition_type(gtk::StackTransitionType::Crossfade);
+    pages.set_transition_duration(120);
+    let current = PLUGIN_TAB.with(|t| t.borrow().clone());
+    let tabs = nyx_ui::widgets::segmented(
+        &[("installed".into(), "Installed".into()), ("browse".into(), "Browse".into())],
+        &current,
+        {
+            let pages = pages.clone();
+            move |id| {
+                pages.set_visible_child_name(&id);
+                PLUGIN_TAB.with(|t| *t.borrow_mut() = id);
+            }
+        },
+    );
+    header.center.append(&tabs);
+    let note = gtk::Label::new(None);
+    note.add_css_class("plugins-note");
+    note.set_xalign(0.);
+    note.set_wrap(true);
+    header.end.set_spacing(4);
+    let add = nyx_ui::widgets::bar_button("list-add-symbolic", "Add a plugin from a folder");
+    let app_clone = app.clone();
+    add.connect_clicked(move |_| add_plugin(&app_clone));
+    header.end.append(&add);
+    let refresh = nyx_ui::widgets::bar_button("view-refresh-symbolic", "Refresh the catalog");
+    let st = note.clone();
+    refresh.connect_clicked(move |_| {
+        run_task(st.clone(), || {
+            let p = Paths::discover();
+            plugins::catalog(&p, true)?;
+            Ok(std::fs::read_to_string(p.state.join("catalog-status.txt"))?)
+        })
+    });
+    header.end.append(&refresh);
+    let close = nyx_ui::widgets::bar_button("window-close-symbolic", "Close (Esc)");
+    let weak = win.downgrade();
+    close.connect_clicked(move |_| {
+        if let Some(w) = weak.upgrade() {
+            w.close();
+        }
+    });
+    close.set_margin_start(6);
+    header.end.append(&close);
+
+    let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    frame.add_css_class("window-frame");
+    frame.append(&header.root);
+    frame.append(&pages);
+    frame.append(&note);
+    win.set_child(Some(&frame));
+    rebuild_plugin_manager(app, &pages, &note);
+
     let weak = win.downgrade();
     let app = app.clone();
     let mut snapshot = plugin_snapshot();
     glib::timeout_add_local(Duration::from_millis(500), move || {
-        let Some(win) = weak.upgrade() else {
+        if weak.upgrade().is_none() {
             return glib::ControlFlow::Break;
-        };
+        }
         let fresh = plugin_snapshot();
         if fresh != snapshot {
             snapshot = fresh;
-            rebuild_plugin_manager(&app, &win);
+            rebuild_plugin_manager(&app, &pages, &note);
         }
         glib::ControlFlow::Continue
     });
@@ -1942,154 +2164,189 @@ fn plugin_snapshot() -> Vec<Vec<u8>> {
         .map(|path| std::fs::read(path).unwrap_or_default())
         .collect()
 }
-fn rebuild_plugin_manager(app: &gtk::Application, win: &gtk::ApplicationWindow) {
-    // Keep the selected tab when actions update the displayed lists.
-    let tab = win
-        .child()
-        .and_then(|root| root.last_child())
-        .and_then(|child| child.downcast::<gtk::Stack>().ok())
-        .and_then(|s| s.visible_child_name());
-    let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    root.add_css_class("glimpse-dialog");
-    root.set_margin_top(16);
-    root.set_margin_bottom(16);
-    root.set_margin_start(16);
-    root.set_margin_end(16);
-    let status = gtk::Label::new(Some("Plugins run separately. Review permissions before enabling."));
-    status.set_wrap(true);
-    let catalog_status = std::fs::read_to_string(Paths::discover().state.join("catalog-status.txt")).unwrap_or_default();
-    if !catalog_status.is_empty() {
-        status.set_text(&catalog_status);
+/// The plugin window's pages, built again whenever the plugins or the catalog change.
+fn rebuild_plugin_manager(app: &gtk::Application, pages: &gtk::Stack, note: &gtk::Label) {
+    let p = Paths::discover();
+    if note.text().is_empty() || note.text() == "Working…" {
+        let status = std::fs::read_to_string(p.state.join("catalog-status.txt")).unwrap_or_default();
+        note.set_text(if status.trim().is_empty() {
+            "Plugins run separately. Review a plugin's permissions before you turn it on."
+        } else {
+            status.trim()
+        });
     }
-    root.append(&status);
-    close_controls(win, &root);
-    let tools = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let local = gtk::Button::with_label("Add local plugin");
-    let app_clone = app.clone();
-    local.connect_clicked(move |_| add_plugin(&app_clone));
-    tools.append(&local);
-    let refresh = gtk::Button::with_label("Refresh catalog");
-    let st = status.clone();
-    refresh.connect_clicked(move |_| {
-        run_task(st.clone(), || {
-            let p = Paths::discover();
-            plugins::catalog(&p, true)?;
-            Ok(std::fs::read_to_string(p.state.join("catalog-status.txt"))?)
-        })
-    });
-    tools.append(&refresh);
-    root.append(&tools);
-    let stack = gtk::Stack::new();
-    let switch = gtk::StackSwitcher::builder().stack(&stack).build();
-    root.append(&switch);
-    let installed = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    if let Ok(items) = plugins::list(&Paths::discover()) {
-        for plugin in items {
-            let row = gtk::Box::new(gtk::Orientation::Vertical, 6);
-            let text = gtk::Label::new(Some(&format!(
-                "{} {} · {}\n{}\nNetwork: {} · Read folders: {}",
-                plugin.manifest.name,
-                plugin.manifest.version,
-                if plugin.grant.enabled { "enabled" } else { "disabled" },
-                plugin.manifest.description,
-                plugin.manifest.permissions.network,
-                if plugin.grant.enabled {
-                    plugin.grant.permissions.read.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
-                } else if plugin.manifest.permissions.selected_sources {
-                    Paths::discover()
-                        .load()
-                        .map(|c| c.roots.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "))
-                        .unwrap_or_default()
-                } else {
-                    plugin.manifest.permissions.read.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
-                }
-            )));
-            text.set_xalign(0.);
-            text.set_wrap(true);
-            row.append(&text);
-            if let Some(error) = plugins::last_error(&Paths::discover(), &plugin.manifest.id) {
-                let label = gtk::Label::new(Some(&format!("Last error: {error}")));
-                label.add_css_class("dim-label");
-                label.set_xalign(0.);
-                label.set_wrap(true);
-                row.append(&label);
-            }
-            let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-            for (label, op) in [
-                (if plugin.grant.enabled { "Disable" } else { "Enable · approve listed permissions" }, "toggle"),
-                ("Update", "update"),
-                ("Rollback", "rollback"),
-                ("Remove", "remove"),
-            ] {
-                let id = plugin.manifest.id.clone();
-                let enabled = plugin.grant.enabled;
-                let st = status.clone();
-                let run = move || {
-                    let id = id.clone();
-                    run_task(st.clone(), move || {
-                        let p = Paths::discover();
-                        match op {
-                            "toggle" => {
-                                if enabled {
-                                    plugins::disable(&p, &id)?;
-                                } else {
-                                    plugins::enable(&p, &id, true)?;
-                                }
-                            }
-                            "update" => {
-                                plugins::update(&p, &id)?;
-                            }
-                            "rollback" => plugins::rollback(&p, &id)?,
-                            "remove" => plugins::remove(&p, &id, false)?,
-                            _ => {}
-                        }
-                        Ok("Plugin updated.".into())
-                    });
-                };
-                // Removing deletes the package, so it takes the suite's two clicks.
-                let button = if op == "remove" {
-                    nyx_ui::widgets::two_click(label, "Click again to remove", run)
-                } else {
-                    let button = gtk::Button::with_label(label);
-                    button.connect_clicked(move |_| run());
-                    button
-                };
-                actions.append(&button);
-            }
-            row.append(&actions);
-            if plugin.manifest.capabilities.contains(&"settings".into()) {
-                let button = gtk::Button::with_label("Settings");
-                let app_clone = app.clone();
-                let id = plugin.manifest.id.clone();
-                button.connect_clicked(move |_| plugin_settings(&app_clone, &id));
-                row.append(&button);
-            }
-            installed.append(&row);
+    for name in ["installed", "browse"] {
+        if let Some(old) = pages.child_by_name(name) {
+            pages.remove(&old);
         }
     }
-    if installed.first_child().is_none() {
-        let empty = gtk::Label::new(Some("No plugins installed. Open Browse or add a local plugin."));
-        empty.set_wrap(true);
-        installed.append(&empty);
-    }
-    let installed_scroll = gtk::ScrolledWindow::builder()
+    let installed = plugins::list(&p).unwrap_or_default();
+    pages.add_named(&plugin_page(&installed_page(app, &installed, note)), Some("installed"));
+    pages.add_named(&plugin_page(&browse_page(&installed, note)), Some("browse"));
+    pages.set_visible_child_name(&PLUGIN_TAB.with(|t| t.borrow().clone()));
+}
+fn plugin_page(body: &gtk::Box) -> gtk::ScrolledWindow {
+    body.add_css_class("plugins-page");
+    gtk::ScrolledWindow::builder()
         .vscrollbar_policy(gtk::PolicyType::External)
-        .hscrollbar_policy(gtk::PolicyType::External)
-        .child(&installed)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .child(body)
         .vexpand(true)
-        .build();
-    stack.add_titled(&installed_scroll, Some("installed"), "Installed");
-    let browse = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    if let Ok(catalog) = plugins::catalog(&Paths::discover(), false) {
-        for item in catalog {
-            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-            let text = gtk::Label::new(Some(&format!("{} · {}", item.name, item.description)));
-            text.set_hexpand(true);
-            text.set_wrap(true);
-            text.set_xalign(0.);
-            row.append(&text);
+        .build()
+}
+fn installed_page(app: &gtk::Application, items: &[plugins::Plugin], note: &gtk::Label) -> gtk::Box {
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    if items.is_empty() {
+        body.append(&nyx_ui::widgets::empty_state(
+            "application-x-addon-symbolic",
+            "No plugins yet",
+            "Install one from Browse, or add a plugin from a folder with +.",
+            None,
+        ));
+        return body;
+    }
+    let p = Paths::discover();
+    for plugin in items {
+        let card = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        card.add_css_class("plugin-card");
+        let head = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        let icon = gtk::Image::from_icon_name("application-x-addon-symbolic");
+        icon.add_css_class("plugin-icon");
+        icon.set_valign(gtk::Align::Start);
+        head.append(&icon);
+        let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        text.set_hexpand(true);
+        let title = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        title.append(&nyx_ui::widgets::label(&plugin.manifest.name, "plugin-name"));
+        title.append(&nyx_ui::widgets::label(&plugin.manifest.version, "plugin-version"));
+        text.append(&title);
+        if !plugin.manifest.description.is_empty() {
+            let desc = nyx_ui::widgets::label(&plugin.manifest.description, "plugin-desc");
+            desc.set_xalign(0.);
+            desc.set_wrap(true);
+            text.append(&desc);
+        }
+        head.append(&text);
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        actions.set_valign(gtk::Align::Start);
+        actions.set_margin_end(6);
+        if plugin.manifest.capabilities.contains(&"settings".into()) {
+            let (app, id) = (app.clone(), plugin.manifest.id.clone());
+            let b = nyx_ui::chrome::settings_button(move || plugin_settings(&app, &id));
+            b.set_tooltip_text(Some("Plugin settings"));
+            actions.append(&b);
+        }
+        for (icon, tip, op) in [
+            ("folder-download-symbolic", "Update", "update"),
+            ("edit-undo-symbolic", "Roll back to the previous version", "rollback"),
+        ] {
+            let b = nyx_ui::widgets::bar_button(icon, tip);
+            let (id, st) = (plugin.manifest.id.clone(), note.clone());
+            b.connect_clicked(move |_| {
+                let id = id.clone();
+                run_task(st.clone(), move || {
+                    let p = Paths::discover();
+                    if op == "update" { plugins::update(&p, &id)?; } else { plugins::rollback(&p, &id)?; }
+                    Ok("Plugin updated.".into())
+                });
+            });
+            actions.append(&b);
+        }
+        let (id, st) = (plugin.manifest.id.clone(), note.clone());
+        // Removing deletes the package, so it takes the suite's two clicks.
+        actions.append(&armed_button("user-trash-symbolic", "Remove", "Click again to remove", move || {
+            let id = id.clone();
+            run_task(st.clone(), move || {
+                plugins::remove(&Paths::discover(), &id, false)?;
+                Ok("Plugin removed.".into())
+            });
+        }));
+        head.append(&actions);
+        let switch = gtk::Switch::builder().active(plugin.grant.enabled).valign(gtk::Align::Start).build();
+        switch.set_tooltip_text(Some(if plugin.grant.enabled {
+            "Turn off"
+        } else {
+            "Turn on: approves the permissions listed below"
+        }));
+        let (id, st) = (plugin.manifest.id.clone(), note.clone());
+        switch.connect_state_set(move |_, on| {
+            let id = id.clone();
+            run_task(st.clone(), move || {
+                let p = Paths::discover();
+                if on { plugins::enable(&p, &id, true)? } else { plugins::disable(&p, &id)? }
+                Ok(if on { "Plugin turned on." } else { "Plugin turned off." }.into())
+            });
+            glib::Propagation::Proceed
+        });
+        head.append(&switch);
+        card.append(&head);
+
+        // What it may touch, as chips under the description.
+        let perms = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        perms.add_css_class("plugin-perms");
+        let want = if plugin.grant.enabled { &plugin.grant.permissions } else { &plugin.manifest.permissions };
+        let mut chips = vec![if want.network { "Network".to_string() } else { "No network".to_string() }];
+        if plugin.manifest.permissions.selected_sources {
+            chips.push("Your search folders".into());
+        }
+        chips.extend(want.read.iter().map(|path| format!("Reads {}", nyx_core::paths::pretty(path))));
+        for chip in chips {
+            let l = nyx_ui::widgets::label(&chip, "plugin-chip");
+            l.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            l.set_max_width_chars(36);
+            perms.append(&l);
+        }
+        card.append(&perms);
+        if let Some(error) = plugins::last_error(&p, &plugin.manifest.id) {
+            let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            line.add_css_class("plugin-error");
+            let icon = gtk::Image::from_icon_name("dialog-warning-symbolic");
+            icon.set_valign(gtk::Align::Start);
+            line.append(&icon);
+            let label = nyx_ui::widgets::label(error.trim_start_matches("plugin: ").trim_matches('"'), "");
+            label.set_xalign(0.);
+            label.set_wrap(true);
+            label.set_tooltip_text(Some("The plugin's last error"));
+            line.append(&label);
+            card.append(&line);
+        }
+
+        body.append(&card);
+    }
+    body
+}
+fn browse_page(installed: &[plugins::Plugin], note: &gtk::Label) -> gtk::Box {
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    body.append(&group_label("Catalog"));
+    let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    list.add_css_class("plugin-card");
+    list.add_css_class("plugin-list");
+    let catalog = plugins::catalog(&Paths::discover(), false).unwrap_or_default();
+    if catalog.is_empty() {
+        let empty = nyx_ui::widgets::label("The catalog isn't loaded. Refresh it with the button above.", "plugin-desc");
+        empty.set_xalign(0.);
+        empty.set_wrap(true);
+        list.append(&empty);
+    }
+    for item in catalog {
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        row.add_css_class("plugin-row");
+        let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        text.set_hexpand(true);
+        text.set_valign(gtk::Align::Center);
+        text.append(&nyx_ui::widgets::label(&item.name, "plugin-name"));
+        let desc = nyx_ui::widgets::label(&item.description, "plugin-desc");
+        desc.set_xalign(0.);
+        desc.set_wrap(true);
+        text.append(&desc);
+        row.append(&text);
+        if installed.iter().any(|p| p.manifest.id == item.id) {
+            row.append(&nyx_ui::widgets::tag("Installed", ""));
+        } else {
             let install = gtk::Button::with_label("Install");
-            let st = status.clone();
+            install.add_css_class("plugin-install");
+            install.set_valign(gtk::Align::Center);
+            let st = note.clone();
             install.connect_clicked(move |_| {
                 let item = item.clone();
                 run_task(st.clone(), move || {
@@ -2099,43 +2356,70 @@ fn rebuild_plugin_manager(app: &gtk::Application, win: &gtk::ApplicationWindow) 
                     } else {
                         plugins::install_git(&p, &item.repo, &item.revision, &item.folder, false)?;
                     }
-                    Ok("Installed, disabled. Review permissions in Installed.".into())
+                    Ok("Installed and turned off. Review its permissions in Installed.".into())
                 });
             });
             row.append(&install);
-            browse.append(&row);
         }
+        list.append(&row);
     }
-    let git = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    body.append(&list);
+
+    body.append(&group_label("From Git"));
+    let git = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    git.add_css_class("plugin-card");
     let url = gtk::Entry::builder().placeholder_text("HTTPS Git repository").build();
     let revision = gtk::Entry::builder().placeholder_text("Full 40-character commit hash").build();
     let folder = gtk::Entry::builder().placeholder_text("Plugin subfolder (optional)").build();
     git.append(&url);
-    git.append(&revision);
-    git.append(&folder);
+    let pair = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    revision.set_hexpand(true);
+    folder.set_hexpand(true);
+    pair.append(&revision);
+    pair.append(&folder);
+    git.append(&pair);
     let install = gtk::Button::with_label("Install from Git");
-    let st = status.clone();
+    install.add_css_class("plugin-install");
+    install.set_halign(gtk::Align::End);
+    let st = note.clone();
     install.connect_clicked(move |_| {
         let (u, r, f) = (url.text().to_string(), revision.text().to_string(), folder.text().to_string());
         run_task(st.clone(), move || {
             plugins::install_git(&Paths::discover(), &u, &r, &f, false)?;
-            Ok("Installed, disabled. Review permissions in Installed.".into())
+            Ok("Installed and turned off. Review its permissions in Installed.".into())
         });
     });
     git.append(&install);
-    browse.append(&git);
-    let browse_scroll = gtk::ScrolledWindow::builder()
-        .vscrollbar_policy(gtk::PolicyType::External)
-        .hscrollbar_policy(gtk::PolicyType::External)
-        .child(&browse)
-        .vexpand(true)
-        .build();
-    stack.add_titled(&browse_scroll, Some("browse"), "Browse");
-    root.append(&stack);
-    win.set_child(Some(&root));
-    if let Some(tab) = tab {
-        stack.set_visible_child_name(&tab);
-    }
+    body.append(&git);
+    body
+}
+fn group_label(text: &str) -> gtk::Label {
+    let l = nyx_ui::widgets::label(&text.to_uppercase(), "plugins-group");
+    l.set_xalign(0.);
+    l
+}
+/// An icon button that needs two clicks: the first arms it (danger tint, `armed`
+/// tooltip) for four seconds, the second acts.
+fn armed_button(icon: &str, idle: &str, armed: &str, act: impl Fn() + 'static) -> gtk::Button {
+    let b = nyx_ui::widgets::bar_button(icon, idle);
+    b.add_css_class("danger-button");
+    let (idle, armed) = (idle.to_string(), armed.to_string());
+    b.connect_clicked(move |b| {
+        if b.has_css_class("armed") {
+            b.remove_css_class("armed");
+            b.set_tooltip_text(Some(&idle));
+            act();
+            return;
+        }
+        b.add_css_class("armed");
+        b.set_tooltip_text(Some(&armed));
+        let (b2, idle2) = (b.clone(), idle.clone());
+        glib::timeout_add_local_once(Duration::from_secs(4), move || {
+            b2.remove_css_class("armed");
+            b2.set_tooltip_text(Some(&idle2));
+        });
+    });
+    b
 }
 fn run_task(label: gtk::Label, task: impl FnOnce() -> anyhow::Result<String> + Send + 'static) {
     label.set_text("Working…");

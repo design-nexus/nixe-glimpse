@@ -18,3 +18,10 @@ Shared dependencies use immutable GitHub revisions. Coordinate public API change
 with the suite manifest and affected consumers in design-nexus/nyx.
 Historical application tags preserve provenance; standalone builds use main
 or subsequent releases. Original release assets remain in the umbrella repo.
+
+Nyx Design 2.0 (`nyx_theme::use_design_2`): the launcher keeps its own layout (search,
+results with a preview, a quiet hint line) on a popover-style panel; no hairlines, the
+UI font, tokens only. Layout checks: run a test copy with
+`GLIMPSE_APP_ID=io.github.design_nexus.nyx.GlimpseTest GLIMPSE_MONITOR=<virtual output>`
+and scratch XDG dirs (`XDG_RUNTIME_DIR` too, with `WAYLAND_DISPLAY` as an absolute
+path); `GLIMPSE_MONITOR` pins the layer surface to that output and leaves the keyboard alone.

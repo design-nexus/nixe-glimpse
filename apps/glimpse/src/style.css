@@ -1,23 +1,21 @@
-/* Glimpse: a launcher on the suite's single flat surface (STYLE.md). Colours come from
-   the theme tokens only; sizes follow the suite's 4/6/10 radius and 2/4 spacing scales. */
+/* Glimpse on Nyx 2.0: a launcher panel on the theme's window surface (STYLE.md), one surface inside:
+   the search, results, preview and hint line share its background; spacing and the
+   selection, not lines, separate them. Colours come from the theme tokens only. */
 
 window.glimpse-window {
   background: @theme_bg;
   color: @theme_text;
-  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
-  font-weight: 500;
-  border: 1px solid @hairline;
 }
 
 /* The launcher is a see-through overlay over the whole monitor; only its panel is drawn. */
 window.glimpse-window.glimpse-launcher {
   background: transparent;
-  border: none;
 }
 
 window.glimpse-window.glimpse-launcher .glimpse-frame {
   background: @theme_bg;
-  border: 1px solid @hairline;
+  border-radius: var(--nyx-radius-dialog);
+  box-shadow: 0 12px 40px alpha(black, 0.38), 0 0 0 1px alpha(@theme_text, 0.06);
 }
 
 /* ---------- Search bar ---------- */
@@ -25,10 +23,6 @@ window.glimpse-window.glimpse-launcher .glimpse-frame {
 .search-bar {
   min-height: 54px;
   padding: 0 16px;
-}
-
-.glimpse-frame.expanded .search-bar {
-  border-bottom: 1px solid @hairline;
 }
 
 window.glimpse-window entry.glimpse-search,
@@ -39,7 +33,7 @@ window.glimpse-window entry.glimpse-search:focus-within {
   background: transparent;
   box-shadow: none;
   outline: none;
-  font-size: 1.15em;
+  font-size: 15px;
 }
 
 window.glimpse-window entry.glimpse-search > image {
@@ -55,16 +49,16 @@ window.glimpse-window entry.glimpse-search > text > placeholder {
 
 list.results {
   background: transparent;
-  padding: 4px 0 8px;
+  padding: 0 0 8px;
 }
 
 list.results > row {
-  min-height: 46px;
-  margin: 1px 6px;
+  min-height: 44px;
+  margin: 1px 8px;
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--nyx-radius-small);
   outline: none;
-  transition: background 150ms ease-out;
+  transition: background 120ms ease-out;
 }
 
 list.results > row.single {
@@ -93,7 +87,7 @@ list.results > row:selected .result-icon {
 }
 
 .result-folder {
-  font-size: 0.86em;
+  font-size: 12px;
   color: @theme_dim_text;
 }
 
@@ -102,36 +96,33 @@ list.results > row:selected .result-folder {
 }
 
 .category-heading {
-  margin: 8px 6px 0;
-  padding: 12px 10px 6px;
-  border-top: 1px solid @hairline;
-  font-size: 0.76em;
+  margin: 8px 8px 0;
+  padding: 12px 10px 4px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 1px;
-  color: @theme_dim_text;
+  letter-spacing: 0.06em;
+  color: @theme_text_tertiary;
 }
 
 .category-heading.first {
   margin-top: 0;
-  padding-top: 8px;
-  border-top: none;
+  padding-top: 4px;
 }
 
 /* ---------- Preview ---------- */
 
 .preview {
-  padding: 14px 16px;
-  border-left: 1px solid @hairline;
+  padding: 4px 16px 14px;
 }
 
 .preview-frame {
-  border: 1px solid @hairline;
-  border-radius: 10px;
+  background: @theme_card;
+  border-radius: var(--nyx-radius-card);
 }
 
 .preview-text {
   padding: 12px 14px;
-  font-size: 0.88em;
+  font-size: 12px;
 }
 
 .preview-picture {
@@ -155,7 +146,7 @@ list.results > row:selected .result-folder {
 }
 
 .preview-card-title {
-  font-size: 1.25em;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -165,7 +156,8 @@ list.results > row:selected .result-folder {
 
 .preview-details {
   padding: 0 4px;
-  font-size: 0.86em;
+  font-size: 12px;
+  font-feature-settings: "tnum";
 }
 
 .detail-key {
@@ -180,7 +172,7 @@ list.results > row:selected .result-folder {
 }
 
 .player-controls label {
-  font-size: 0.86em;
+  font-size: 12px;
   font-feature-settings: "tnum";
   color: @theme_dim_text;
 }
@@ -190,11 +182,13 @@ window.glimpse-window .player-controls button {
   min-width: 30px;
   padding: 0;
   border: none;
+  border-radius: var(--nyx-radius-small);
   background: transparent;
   color: @theme_dim_text;
 }
 
 window.glimpse-window .player-controls button:hover {
+  background: @row_hover;
   color: @theme_text;
 }
 
@@ -202,38 +196,255 @@ window.glimpse-window .player-controls button:hover {
 
 .calculation-display {
   padding: 10px 4px 14px;
-  font-size: 1.5em;
+  font-size: 22px;
   font-weight: 600;
+  font-feature-settings: "tnum";
 }
 
 window.glimpse-window .calculator button {
   min-height: 32px;
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--nyx-radius-small);
+  font-feature-settings: "tnum";
 }
 
-/* ---------- Status bar ---------- */
+/* ---------- Hint line ---------- */
+
+/* Key hints, the count and the panel's actions: a quiet line on the panel's own
+   surface, not a bar of its own. */
+window.glimpse-window.glimpse-launcher .status-bar {
+  background: transparent;
+  border-top: none;
+  min-height: 36px;
+  padding: 0 8px 0 16px;
+}
 
 .status-hints {
   color: @theme_dim_text;
 }
 
-.status-hints .key-cap {
-  min-height: 0;
+/* Key hints: small quiet caps, then what they do. */
+window.glimpse-window .hint-key {
+  min-height: 18px;
+  min-width: 10px;
   padding: 0 5px;
-  font-size: 0.78em;
-  color: @theme_text;
+  border-radius: 5px;
+  background: alpha(@theme_text, 0.07);
+  color: @theme_dim_text;
+  font-size: 10.5px;
+  font-weight: 500;
 }
 
-.status-hints .dim {
-  margin: 0 -2px;
+window.glimpse-window .hint-label {
+  font-size: 11.5px;
+  color: @theme_dim_text;
 }
 
 .status-message {
   color: @theme_text;
+  font-size: 11.5px;
 }
 
 .status-count {
-  margin-right: 10px;
+  margin-right: 6px;
+  font-size: 11.5px;
+  color: @theme_text_tertiary;
   font-feature-settings: "tnum";
+}
+
+window.glimpse-window.glimpse-launcher .status-bar button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: var(--nyx-radius-small);
+  background: transparent;
+  box-shadow: none;
+  color: @theme_text_tertiary;
+}
+
+window.glimpse-window.glimpse-launcher .status-bar button:hover {
+  background: @row_hover;
+  color: @theme_text;
+}
+
+/* ---------- Plugins window ---------- */
+
+window.plugins-window .app-header button.bar-button,
+.plugin-card button.bar-button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: var(--nyx-radius-small);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: @theme_dim_text;
+}
+
+window.plugins-window .app-header button.bar-button:hover,
+.plugin-card button.bar-button:hover {
+  background: @row_hover;
+  color: @theme_text;
+}
+
+.plugin-card button.danger-button:hover,
+.plugin-card button.danger-button.armed {
+  background: alpha(@theme_danger, 0.16);
+  color: @theme_danger;
+}
+
+.plugins-page {
+  padding: 8px 16px 16px;
+}
+
+.plugins-group {
+  margin: 10px 2px 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: @theme_text_tertiary;
+}
+
+.plugins-group:first-child {
+  margin-top: 0;
+}
+
+.plugin-card {
+  padding: 14px;
+  border-radius: var(--nyx-radius-card);
+  background: @theme_card;
+}
+
+.plugin-card.plugin-list {
+  padding: 4px 14px;
+}
+
+.plugin-row {
+  min-height: 52px;
+  padding: 8px 0;
+}
+
+.plugin-icon {
+  -gtk-icon-size: 18px;
+  margin-top: 1px;
+  color: @theme_accent;
+}
+
+.plugin-name {
+  font-weight: 600;
+}
+
+.plugin-version {
+  font-size: 11.5px;
+  color: @theme_text_tertiary;
+  font-feature-settings: "tnum";
+}
+
+.plugin-desc {
+  font-size: 12.5px;
+  color: @theme_dim_text;
+}
+
+.plugin-perms {
+  margin-left: 30px;
+}
+
+.plugin-chip {
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--nyx-radius-small);
+  background: @field;
+  font-size: 11.5px;
+  color: @theme_dim_text;
+}
+
+.plugin-error {
+  margin-left: 30px;
+  font-size: 12px;
+  color: @theme_dim_text;
+}
+
+.plugin-error image {
+  -gtk-icon-size: 14px;
+  color: @theme_warning;
+}
+
+window.glimpse-window button.plugin-install {
+  min-height: 30px;
+  padding: 0 14px;
+  border-radius: var(--nyx-radius-small);
+  font-weight: 500;
+  background: alpha(@theme_accent, 0.16);
+  color: @theme_accent;
+  box-shadow: none;
+  border: none;
+}
+
+window.glimpse-window button.plugin-install:hover {
+  background: alpha(@theme_accent, 0.24);
+}
+
+.plugins-note {
+  padding: 8px 18px 12px;
+  font-size: 11.5px;
+  color: @theme_text_tertiary;
+}
+
+/* ---------- App card ---------- */
+
+.app-card {
+  padding: 22px 22px 18px;
+}
+
+.app-card > * {
+  margin-bottom: 14px;
+}
+
+.app-card > :last-child {
+  margin-bottom: 0;
+}
+
+.app-card-name {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.app-card-kind {
+  font-size: 12.5px;
+  color: @theme_dim_text;
+}
+
+.app-card-desc {
+  font-size: 13px;
+  color: @theme_text;
+}
+
+.app-chip {
+  min-height: 22px;
+  padding: 0 9px;
+  border-radius: var(--nyx-radius-small);
+  background: alpha(@theme_accent, 0.12);
+  color: @theme_accent;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.app-card-info {
+  padding-top: 14px;
+  font-size: 12px;
+}
+
+.app-card-info .detail-key {
+  min-width: 72px;
+  color: @theme_text_tertiary;
+}
+
+.app-card-info .detail-value {
+  color: @theme_dim_text;
+}
+
+.app-card-command {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+  color: @theme_dim_text;
 }
